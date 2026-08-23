@@ -1,0 +1,43 @@
+version: '3.9'
+
+services:
+
+  pgvector:
+    image: pgvector/pgvector:0.8.1-pg18-trixie
+    container_name: pgvector-db-knowledgeos
+
+    environment:
+      POSTGRES_DB: knowledgeos
+      POSTGRES_USER: knowledgeos
+      POSTGRES_PASSWORD: knowledgeos
+
+    ports:
+      - "5434:5432"
+
+    volumes:
+      - pgvector-knowledgeos-data:/var/lib/postgresql
+
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: minio-knowledgeos
+
+    command: server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+
+    volumes:
+      - minio-knowledgeos-data:/data
+
+    restart: unless-stopped
+
+volumes:
+  minio-knowledgeos-data:
+  pgvector-knowledgeos-data:
