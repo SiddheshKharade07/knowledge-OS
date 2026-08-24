@@ -22,9 +22,6 @@ export class ApiRequestError extends Error {
 export const http = axios.create({
   baseURL: API_BASE_URL,
   timeout: 120_000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 http.interceptors.response.use(

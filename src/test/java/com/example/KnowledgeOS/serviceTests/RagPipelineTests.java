@@ -29,7 +29,8 @@ public class RagPipelineTests {
     @BeforeEach
     void setUp() throws Exception {
         try {
-            DocumentResponse response = storageService.uploadFile("company-faq.txt");
+            DocumentResponse response = storageService.uploadFile(
+                    TestUploads.fromClasspath("company-faq.txt", "text/plain"));
             ingestedDocId = response.id();
             documentIngestionService.ingest(ingestedDocId);
             System.out.println("Ingested company-faq.txt successfully with ID: " + ingestedDocId);

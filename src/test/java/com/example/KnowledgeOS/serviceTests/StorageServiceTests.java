@@ -17,13 +17,16 @@ public class StorageServiceTests {
 
     @Test
     void testUploadFile() throws IOException {
-        DocumentResponse response = storageService.uploadFile("threads-concurrency-reactor-schedulers.pdf");
+        DocumentResponse response = storageService.uploadFile(
+                TestUploads.fromClasspath("threads-concurrency-reactor-schedulers.pdf", "application/pdf"));
         System.out.println(response.toString());
     }
 
     @Test
-    void testGetFileContent() {
-        FileContentResponse response = storageService.getFileContent(2L);
+    void testGetFileContent() throws IOException {
+        DocumentResponse uploaded = storageService.uploadFile(
+                TestUploads.fromClasspath("company-faq.txt", "text/plain"));
+        FileContentResponse response = storageService.getFileContent(uploaded.id());
 
         System.out.println(response.content());
     }

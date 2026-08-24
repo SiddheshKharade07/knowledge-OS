@@ -3,7 +3,7 @@ import type { DocumentChunkResponse, DocumentResponse, FileContentResponse } fro
 
 export interface DocumentsApi {
   listDocuments(): Promise<DocumentResponse[]>;
-  uploadDocument(fileName: string): Promise<DocumentResponse>;
+  uploadDocument(file: File): Promise<DocumentResponse>;
   ingestDocument(id: number): Promise<void>;
   getDocumentContent(id: number): Promise<FileContentResponse>;
   getDocumentChunks(id: number): Promise<DocumentChunkResponse[]>;
@@ -15,8 +15,12 @@ export const realDocumentsApi: DocumentsApi = {
     return data;
   },
 
-  async uploadDocument(fileName) {
-    const { data } = await http.post<DocumentResponse>('/v1/documents', { fileName });
+  async uploadDocument(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await http.post<DocumentResponse>('/v1/documents', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return data;
   },
 

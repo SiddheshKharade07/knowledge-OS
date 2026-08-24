@@ -21,10 +21,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -63,16 +62,20 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
-    public DocumentResponse uploadFile(String filePath) throws IOException {
-        ClassPathResource resource = new ClassPathResource("static/" + filePath);
-
-        if (!resource.exists()) {
-            throw new FileNotFoundException("File not found: " + filePath);
+    public DocumentResponse uploadFile(MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Uploaded file is empty");
         }
 
-        String fileName = resource.getFilename();
-        long fileSize = resource.contentLength();
-        String contentType = probeContentType(fileName);
+        String originalName = file.getOriginalFilename();
+        if (originalName == null || originalName.isBlank()) {
+            throw new IllegalArgumentException("Uploaded file name is required");
+        }
+        String fileName = Path.of(originalName).getFileName().toString();
+        long fileSize = file.getSize();
+        String contentType = file.getContentType() != null
+                ? file.getContentType()
+                : probeContentType(fileName);
 
         DocumentEntity savedDocument = documentRepository.save(DocumentEntity.builder()
                 .fileName(fileName)
@@ -83,7 +86,7 @@ public class StorageServiceImpl implements StorageService {
 
         String objectName = savedDocument.getId() + "/" + fileName;
 
-        try (InputStream inputStream = resource.getInputStream()) {
+        try (InputStream inputStream = file.getInputStream()) {
             minioClient.putObject(
                     PutObjectArgs.builder()
                             .contentType(contentType)
@@ -93,7 +96,7 @@ public class StorageServiceImpl implements StorageService {
                             .build()
             );
         } catch (Exception exception) {
-            log.error("Failed to upload file: {}", filePath, exception);
+            log.error("Failed to upload file: {}", fileName, exception);
             markFailed(savedDocument);
             throw new StorageException("Failed to upload file: " + fileName, exception);
         }

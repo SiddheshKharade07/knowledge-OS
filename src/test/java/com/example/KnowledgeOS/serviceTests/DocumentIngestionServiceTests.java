@@ -18,7 +18,8 @@ public class DocumentIngestionServiceTests {
 
     @Test
     void testIngest() throws Exception {
-        DocumentResponse response = storageService.uploadFile("threads-concurrency-reactor-schedulers.pdf");
+        DocumentResponse response = storageService.uploadFile(
+                TestUploads.fromClasspath("threads-concurrency-reactor-schedulers.pdf", "application/pdf"));
         System.out.println("Uploaded doc ID: " + response.id());
         service.ingest(response.id());
         System.out.println("Ingestion completed for doc ID: " + response.id());

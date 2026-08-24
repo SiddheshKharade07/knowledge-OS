@@ -1,6 +1,5 @@
 package com.example.KnowledgeOS.controllerTests;
 
-import com.example.KnowledgeOS.dto.request.DocumentUploadRequest;
 import com.example.KnowledgeOS.dto.request.RagQueryRequest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -10,10 +9,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +32,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class ApiSmokeTests {
 
+    private static final String UPLOAD_CONTENT =
+            "Company FAQ. Employees may work remotely up to three days per week with manager "
+            + "approval. Fully remote arrangements require VP sign-off and are reviewed every "
+            + "six months. Core collaboration hours are 10:00-15:00 in the team's primary timezone.";
+
     @Autowired
     private TestRestTemplate restTemplate;
 
@@ -34,9 +45,19 @@ public class ApiSmokeTests {
     @Test
     @Order(10)
     void uploadDocumentReturns201() {
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", new ByteArrayResource(UPLOAD_CONTENT.getBytes(StandardCharsets.UTF_8)) {
+            @Override
+            public String getFilename() {
+                return "company-faq.txt";
+            }
+        });
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
         ResponseEntity<Map> response = restTemplate.postForEntity(
                 "/api/v1/documents",
-                new DocumentUploadRequest("company-faq.txt"),
+                new HttpEntity<>(body, headers),
                 Map.class);
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());

@@ -19,6 +19,8 @@ The dev server proxies `/api` to `http://localhost:8080`, so start the Spring Bo
 | Real API | `VITE_ENABLE_MOCKS=false` (default) | All requests hit the backend; failures surface as error banners with retry. Nothing is ever fabricated. |
 | Demo | set `VITE_ENABLE_MOCKS=true` in `.env.development.local` | Canned documents/answers served from `src/mocks/mockBackend.ts`; "Demo mode" indicator shows in the sidebar. |
 
+Uploads use `multipart/form-data` (`POST /api/v1/documents`, `file` part, max 25MB, `.txt/.md/.pdf`).
+
 ## Env vars
 
 Copy `.env.example` to `.env.development.local` and adjust:

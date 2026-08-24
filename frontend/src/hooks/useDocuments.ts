@@ -12,7 +12,7 @@ export function useDocuments() {
 export function useUploadDocument(onError?: (message: string) => void) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (fileName: string) => documentsApi.uploadDocument(fileName),
+    mutationFn: (file: File) => documentsApi.uploadDocument(file),
     onSuccess: (uploaded: DocumentResponse) => {
       queryClient.setQueryData<DocumentResponse[]>(['documents'], (current) =>
         current ? [uploaded, ...current] : [uploaded],

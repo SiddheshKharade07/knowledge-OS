@@ -3,14 +3,14 @@ package com.example.KnowledgeOS.controller;
 import com.example.KnowledgeOS.dto.DocumentChunkResponse;
 import com.example.KnowledgeOS.dto.DocumentResponse;
 import com.example.KnowledgeOS.dto.FileContentResponse;
-import com.example.KnowledgeOS.dto.request.DocumentUploadRequest;
 import com.example.KnowledgeOS.service.DocumentIngestionService;
 import com.example.KnowledgeOS.service.StorageService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
@@ -23,10 +23,10 @@ public class DocumentController {
     private final StorageService storageService;
     private final DocumentIngestionService documentIngestionService;
 
-    @PostMapping
-    public ResponseEntity<DocumentResponse> upload(@Valid @RequestBody DocumentUploadRequest request)
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<DocumentResponse> upload(@RequestParam("file") MultipartFile file)
             throws IOException {
-        DocumentResponse response = storageService.uploadFile(request.fileName());
+        DocumentResponse response = storageService.uploadFile(file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

@@ -141,19 +141,20 @@ export const mockDocumentsApi: DocumentsApi = {
     );
   },
 
-  async uploadDocument(fileName) {
+  async uploadDocument(file: File) {
     await latency();
     maybeFail('upload');
-    const trimmed = fileName.trim();
+    const trimmed = file.name.trim();
     if (!trimmed || trimmed.length > 255) {
-      throw new Error('fileName must be between 1 and 255 characters.');
+      throw new Error('File name must be between 1 and 255 characters.');
     }
     const now = new Date().toISOString();
     const document: DocumentResponse = {
       id: ++nextId,
       fileName: trimmed,
-      contentType: trimmed.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/plain',
-      fileSize: Math.floor(2_000 + Math.random() * 40_000),
+      contentType:
+        file.type || (trimmed.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/plain'),
+      fileSize: file.size,
       documentStatus: 'UPLOADED',
       createdAt: now,
     };
