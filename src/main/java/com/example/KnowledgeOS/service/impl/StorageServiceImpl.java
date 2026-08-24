@@ -1,13 +1,16 @@
 package com.example.KnowledgeOS.service.impl;
 
 import com.example.KnowledgeOS.config.StorageConfig;
+import com.example.KnowledgeOS.dto.DocumentChunkResponse;
 import com.example.KnowledgeOS.dto.DocumentResponse;
 import com.example.KnowledgeOS.dto.FileContentResponse;
 import com.example.KnowledgeOS.entity.DocumentEntity;
 import com.example.KnowledgeOS.entity.enums.DocumentStatus;
 import com.example.KnowledgeOS.exception.DocumentNotFoundException;
 import com.example.KnowledgeOS.exception.StorageException;
+import com.example.KnowledgeOS.mapper.DocumentChunkMapper;
 import com.example.KnowledgeOS.mapper.DocumentMapper;
+import com.example.KnowledgeOS.repository.DocumentChunkRepository;
 import com.example.KnowledgeOS.repository.DocumentRepository;
 import com.example.KnowledgeOS.service.StorageService;
 import io.minio.GetObjectArgs;
@@ -28,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -36,8 +40,27 @@ public class StorageServiceImpl implements StorageService {
 
     private final MinioClient minioClient;
     private final DocumentRepository documentRepository;
+    private final DocumentChunkRepository documentChunkRepository;
     private final StorageConfig storageConfig;
     private final DocumentMapper documentMapper;
+    private final DocumentChunkMapper documentChunkMapper;
+
+    @Override
+    public List<DocumentResponse> listDocuments() {
+        return documentRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(documentMapper::toResponse)
+                .toList();
+    }
+
+    @Override
+    public List<DocumentChunkResponse> getDocumentChunks(Long documentId) {
+        if (!documentRepository.existsById(documentId)) {
+            throw new DocumentNotFoundException(documentId);
+        }
+        return documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId).stream()
+                .map(documentChunkMapper::toDocumentChunkResponse)
+                .toList();
+    }
 
     @Override
     public DocumentResponse uploadFile(String filePath) throws IOException {

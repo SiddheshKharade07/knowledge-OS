@@ -12,6 +12,8 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
 
     void deleteByDocumentId(Long documentId);
 
+    List<DocumentChunk> findByDocumentIdOrderByChunkIndexAsc(Long documentId);
+
     @Modifying
     @Query(value = "UPDATE document_chunks SET embedding = CAST(:vectorStr AS vector) WHERE id = :chunkId", nativeQuery = true)
     void updateChunkEmbedding(@Param("chunkId") Long chunkId, @Param("vectorStr") String vectorStr);

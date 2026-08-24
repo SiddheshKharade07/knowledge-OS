@@ -9,6 +9,8 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -30,7 +32,7 @@ public class ApiSmokeTests {
     private static Long uploadedDocumentId;
 
     @Test
-    @Order(1)
+    @Order(10)
     void uploadDocumentReturns201() {
         ResponseEntity<Map> response = restTemplate.postForEntity(
                 "/api/v1/documents",
@@ -45,7 +47,25 @@ public class ApiSmokeTests {
     }
 
     @Test
-    @Order(2)
+    @Order(20)
+    void listDocumentsContainsUploadedDocument() {
+        ResponseEntity<List<Map>> response = restTemplate.exchange(
+                "/api/v1/documents",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<List<Map>>() {
+                });
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isEmpty(), "document list should not be empty");
+        assertTrue(response.getBody().stream().anyMatch(doc ->
+                        uploadedDocumentId.equals(((Number) doc.get("id")).longValue())),
+                "uploaded document should appear in list");
+    }
+
+    @Test
+    @Order(30)
     void ingestUploadedDocumentReturns202() {
         ResponseEntity<Void> response = restTemplate.postForEntity(
                 "/api/v1/documents/" + uploadedDocumentId + "/ingest", null, Void.class);
@@ -54,7 +74,25 @@ public class ApiSmokeTests {
     }
 
     @Test
-    @Order(3)
+    @Order(40)
+    void chunksOfIngestedDocumentAreReturned() {
+        ResponseEntity<List<Map>> response = restTemplate.exchange(
+                "/api/v1/documents/" + uploadedDocumentId + "/chunks",
+                HttpMethod.GET,
+                null,
+                new ParameterizedTypeReference<List<Map>>() {
+                });
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isEmpty(), "ingested document should have chunks");
+        assertTrue(response.getBody().stream().allMatch(chunk ->
+                        ((Number) chunk.get("chunkIndex")).intValue() >= 0),
+                "chunks should carry chunk indexes");
+    }
+
+    @Test
+    @Order(50)
     void getIngestedDocumentContentReturns200() {
         ResponseEntity<Map> response = restTemplate.getForEntity(
                 "/api/v1/documents/" + uploadedDocumentId + "/content", Map.class);
@@ -66,7 +104,7 @@ public class ApiSmokeTests {
     }
 
     @Test
-    @Order(4)
+    @Order(60)
     void ragQueryReturnsAnswerWithCitations() {
         ResponseEntity<Map> response = restTemplate.postForEntity(
                 "/api/v1/rag/query",
@@ -82,7 +120,7 @@ public class ApiSmokeTests {
     }
 
     @Test
-    @Order(5)
+    @Order(70)
     void blankQueryIsRejectedWith400() {
         ResponseEntity<String> response = restTemplate.postForEntity(
                 "/api/v1/rag/query",
@@ -93,12 +131,21 @@ public class ApiSmokeTests {
     }
 
     @Test
-    @Order(6)
+    @Order(80)
     void ingestUnknownDocumentReturns404() {
         ResponseEntity<String> response = restTemplate.postForEntity(
                 "/api/v1/documents/999999/ingest", null, String.class);
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         assertTrue(response.getBody().contains("Document not found"));
+    }
+
+    @Test
+    @Order(81)
+    void chunksOfUnknownDocumentReturn404() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/v1/documents/999999/chunks", String.class);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
     }
 }
