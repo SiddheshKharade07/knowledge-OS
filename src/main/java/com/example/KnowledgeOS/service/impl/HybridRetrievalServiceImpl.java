@@ -8,6 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 @Slf4j
 @Service
@@ -29,15 +32,27 @@ public class HybridRetrievalServiceImpl implements HybridRetrievalService {
         QueryAnalysisResponse analysis = queryAnalysisService.analyze(userQuery);
         List<String> searchTerms = analysis.searchTerms();
 
-        // 2. Parallel / Dual Retrieval
+        // 2. Dual retrieval, executed concurrently on virtual threads (blocking I/O)
         int lexicalTopK = ragProperties.getLexical().getTopK();
-        List<RetrievalCandidate> lexicalCandidates =
-                lexicalSearchService.search(userQuery, searchTerms, lexicalTopK);
-
         int semanticTopK = ragProperties.getSemantic().getTopK();
         double similarityThreshold = ragProperties.getSemantic().getSimilarityThreshold();
-        List<RetrievalCandidate> semanticCandidates =
-                semanticSearchService.search(userQuery, similarityThreshold, semanticTopK);
+
+        List<RetrievalCandidate> lexicalCandidates;
+        List<RetrievalCandidate> semanticCandidates;
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<List<RetrievalCandidate>> lexicalFuture =
+                    executor.submit(() -> lexicalSearchService.search(userQuery, searchTerms, lexicalTopK));
+            Future<List<RetrievalCandidate>> semanticFuture =
+                    executor.submit(() -> semanticSearchService.search(userQuery, similarityThreshold, semanticTopK));
+
+            lexicalCandidates = lexicalFuture.get();
+            semanticCandidates = semanticFuture.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Hybrid retrieval interrupted", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("Hybrid retrieval failed for query: " + userQuery, e);
+        }
 
         // 3. Hybrid Fusion (RRF)
         int fusionTopK = ragProperties.getFusion().getTopK();

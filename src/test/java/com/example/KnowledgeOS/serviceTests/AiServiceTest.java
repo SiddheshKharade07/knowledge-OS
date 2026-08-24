@@ -1,7 +1,6 @@
 package com.example.KnowledgeOS.serviceTests;
 
 import com.example.KnowledgeOS.service.AIService;
-import com.example.KnowledgeOS.service.impl.AIServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -10,7 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 public class AiServiceTest {
 
     @Autowired
-    private AIServiceImpl aiService;
+    private AIService aiService;
 
     @Test
     void testAskAi() {
@@ -20,12 +19,7 @@ public class AiServiceTest {
 
     @Test
     void testGetEmbedding() {
-        String response = aiService.getEmbedding("Hey my name is john");
-        System.out.println(response);
-    }
-
-    @Test
-    void testGetVectorSize() {
-        System.out.println(aiService.getVectorSize());
+        float[] embedding = aiService.getVectorEmbedding("Hey my name is john");
+        System.out.println(embedding.length);
     }
 }

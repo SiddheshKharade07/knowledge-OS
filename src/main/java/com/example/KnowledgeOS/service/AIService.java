@@ -1,10 +1,12 @@
 package com.example.KnowledgeOS.service;
 
+import java.util.List;
+
 public interface AIService {
 
     String askAi(String prompt);
 
-    String getEmbedding(String text);
-
     float[] getVectorEmbedding(String text);
+
+    List<float[]> getVectorEmbeddings(List<String> texts);
 }

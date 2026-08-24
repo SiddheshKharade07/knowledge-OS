@@ -5,6 +5,7 @@ import com.example.KnowledgeOS.repository.ChunkSearchResultProjection;
 import com.example.KnowledgeOS.repository.DocumentChunkRepository;
 import com.example.KnowledgeOS.service.AIService;
 import com.example.KnowledgeOS.service.SemanticSearchService;
+import com.example.KnowledgeOS.util.VectorUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,7 +34,7 @@ public class SemanticSearchServiceImpl implements SemanticSearchService {
                 return List.of();
             }
 
-            String vectorStr = formatVectorForPgVector(embedding);
+            String vectorStr = VectorUtils.toPgVectorString(embedding);
 
             List<ChunkSearchResultProjection> projections =
                     documentChunkRepository.searchSemanticVector(vectorStr, similarityThreshold, topK);
@@ -59,17 +60,5 @@ public class SemanticSearchServiceImpl implements SemanticSearchService {
             log.error("Failed pgvector semantic search for query '{}'", userQuery, e);
             return List.of();
         }
-    }
-
-    private String formatVectorForPgVector(float[] vector) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < vector.length; i++) {
-            sb.append(vector[i]);
-            if (i < vector.length - 1) {
-                sb.append(",");
-            }
-        }
-        sb.append("]");
-        return sb.toString();
     }
 }

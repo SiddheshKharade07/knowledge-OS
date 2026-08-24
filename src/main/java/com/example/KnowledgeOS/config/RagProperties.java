@@ -15,7 +15,6 @@ public class RagProperties {
     private Semantic semantic = new Semantic();
     private Fusion fusion = new Fusion();
     private Reranker reranker = new Reranker();
-    private FinalContext finalContext = new FinalContext();
 
     @Getter
     @Setter
@@ -42,11 +41,6 @@ public class RagProperties {
     public static class Reranker {
         private int topK = 5;
         private boolean enabled = true;
-    }
-
-    @Getter
-    @Setter
-    public static class FinalContext {
-        private int topK = 5;
+        private int maxInput = 10;
     }
 }
