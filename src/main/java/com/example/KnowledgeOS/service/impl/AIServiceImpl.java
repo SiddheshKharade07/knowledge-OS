@@ -6,6 +6,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
+
 @Service
 @RequiredArgsConstructor
 public class AIServiceImpl implements AIService {
@@ -15,7 +17,6 @@ public class AIServiceImpl implements AIService {
 
     @Override
     public String askAi(String prompt) {
-
         return chatClient.prompt()
                 .user(prompt)
                 .call()
@@ -24,13 +25,17 @@ public class AIServiceImpl implements AIService {
 
     @Override
     public String getEmbedding(String text) {
-        return embeddingModel.embed(text).toString();
+        float[] embedding = getVectorEmbedding(text);
+        return Arrays.toString(embedding);
+    }
+
+    @Override
+    public float[] getVectorEmbedding(String text) {
+        return embeddingModel.embed(text);
     }
 
     public int getVectorSize() {
-        float[] embedding =
-                embeddingModel.embed("Spring Boot is a Java framework.");
-
+        float[] embedding = getVectorEmbedding("Spring Boot is a Java framework.");
         return embedding.length;
     }
 }

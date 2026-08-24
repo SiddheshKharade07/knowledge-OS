@@ -21,7 +21,7 @@ public class DocumentChunk {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "document_id", nullable = false)
-    private Document document;
+    private DocumentEntity document;
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;

@@ -1,0 +1,13 @@
+KnowledgeOS Test Document — Company FAQ
+
+Q: Where should employees report technical problems?
+A: Employees should use the approved IT support channel.
+
+Q: Can employees work remotely?
+A: Remote work may be available depending on the role and team requirements.
+
+Q: How should confidential information be handled?
+A: Confidential organizational information must only be shared with authorized people.
+
+Q: Who approves planned leave?
+A: Planned leave requests are reviewed and approved by the employee's manager.

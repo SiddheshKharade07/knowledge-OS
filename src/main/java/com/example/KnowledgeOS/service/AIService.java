@@ -2,7 +2,9 @@ package com.example.KnowledgeOS.service;
 
 public interface AIService {
 
-    public String askAi(String prompt);
+    String askAi(String prompt);
 
-    public String getEmbedding(String text);
+    String getEmbedding(String text);
+
+    float[] getVectorEmbedding(String text);
 }

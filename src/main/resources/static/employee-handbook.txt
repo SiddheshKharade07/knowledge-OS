@@ -1,0 +1,16 @@
+KnowledgeOS Test Document — Employee Handbook
+
+1. Working Hours
+Employees normally work from 9:00 AM to 6:00 PM, Monday through Friday. Teams may have different schedules when approved by their manager.
+
+2. Leave Policy
+Employees should submit planned leave requests through the organization's approved leave process. Managers are responsible for reviewing and approving requests.
+
+3. Remote Work
+Remote work may be permitted when the employee's role and team requirements allow it. Employees should follow their team's remote-work procedure.
+
+4. Information Security
+Employees must protect organizational information and must not share confidential documents with unauthorized people.
+
+5. IT Support
+Technical issues should be reported through the organization's approved IT support channel.

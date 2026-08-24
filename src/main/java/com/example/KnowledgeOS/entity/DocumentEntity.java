@@ -14,7 +14,7 @@ import java.time.Instant;
 @AllArgsConstructor
 @NoArgsConstructor
 @Table(name = "documents")
-public class Document {
+public class DocumentEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -23,12 +23,12 @@ public class Document {
     @Column(nullable = false)
     private String fileName;
 
-    @Column(nullable = false)
+//    @Column(nullable = false)
     private String contentType;
 
     private Long fileSize;
 
-    @Column(nullable = false, unique = true)
+//    @Column(nullable = false, unique = true)
     private String minioObjectKey;
 
     @Enumerated(EnumType.STRING)
