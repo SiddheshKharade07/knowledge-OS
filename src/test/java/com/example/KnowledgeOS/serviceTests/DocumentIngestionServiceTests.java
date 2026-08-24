@@ -17,13 +17,10 @@ public class DocumentIngestionServiceTests {
     private DocumentIngestionService service;
 
     @Test
-    void testIngest() {
-        try {
-            DocumentResponse doc = storageService.uploadFile("company-faq.txt");
-            service.ingest(doc.id());
-            System.out.println("Ingested doc ID: " + doc.id());
-        } catch (Exception e) {
-            System.out.println("Ingestion test note: " + e.getMessage());
-        }
+    void testIngest() throws Exception {
+        DocumentResponse response = storageService.uploadFile("threads-concurrency-reactor-schedulers.pdf");
+        System.out.println("Uploaded doc ID: " + response.id());
+        service.ingest(response.id());
+        System.out.println("Ingestion completed for doc ID: " + response.id());
     }
 }
