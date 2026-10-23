@@ -30,6 +30,12 @@ public class DocumentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @PostMapping("/upload/{fileName}")
+    public ResponseEntity<DocumentResponse> uploadDoc(@PathVariable String fileName) throws IOException {
+        DocumentResponse documentResponse = storageService.uploadFileViaFilePath(fileName);
+        return ResponseEntity.status(HttpStatus.CREATED).body(documentResponse);
+    }
+
     @GetMapping
     public ResponseEntity<List<DocumentResponse>> listDocuments() {
         return ResponseEntity.ok(storageService.listDocuments());

@@ -1,6 +1,6 @@
 package com.example.KnowledgeOS.dto;
 
-import com.example.KnowledgeOS.entity.enums.DocumentStatus;
+import com.example.KnowledgeOS.enums.DocumentStatus;
 
 public record DocumentResponse(
        Long id,

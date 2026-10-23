@@ -1,9 +1,9 @@
 package com.example.KnowledgeOS.service.impl;
 
 import com.example.KnowledgeOS.dto.FileContentResponse;
+import com.example.KnowledgeOS.entity.Document;
 import com.example.KnowledgeOS.entity.DocumentChunk;
-import com.example.KnowledgeOS.entity.DocumentEntity;
-import com.example.KnowledgeOS.entity.enums.DocumentStatus;
+import com.example.KnowledgeOS.enums.DocumentStatus;
 import com.example.KnowledgeOS.exception.DocumentNotFoundException;
 import com.example.KnowledgeOS.exception.StorageException;
 import com.example.KnowledgeOS.repository.DocumentChunkRepository;
@@ -14,7 +14,6 @@ import com.example.KnowledgeOS.service.StorageService;
 import com.example.KnowledgeOS.util.VectorUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -35,11 +34,11 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
 
     @Override
     public void ingest(Long documentId) {
-        DocumentEntity documentEntity = documentRepository.findById(documentId)
+        Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 
         try {
-            markStatus(documentEntity, DocumentStatus.PROCESSING);
+            markStatus(document, DocumentStatus.PROCESSING);
 
             FileContentResponse fileContentResponse = storageService.getFileContent(documentId);
             String content = fileContentResponse.content();
@@ -48,38 +47,38 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
             }
 
             List<DocumentChunk> savedChunks = transactionTemplate.execute(tx ->
-                    replaceChunks(documentEntity, content));
+                    replaceChunks(document, content));
             if (savedChunks == null || savedChunks.isEmpty()) {
                 throw new IllegalStateException("Chunking produced no chunks for document " + documentId);
             }
 
             persistEmbeddings(savedChunks);
 
-            markStatus(documentEntity, DocumentStatus.COMPLETED);
+            markStatus(document, DocumentStatus.COMPLETED);
             log.info("Ingested document {} into {} chunks with pgvector embeddings",
                     documentId, savedChunks.size());
         } catch (Exception e) {
             log.error("Failed to ingest document {}", documentId, e);
-            markStatus(documentEntity, DocumentStatus.FAILED);
+            markStatus(document, DocumentStatus.FAILED);
             throw new StorageException("Failed to ingest document " + documentId, e);
         }
     }
 
-    private List<DocumentChunk> replaceChunks(DocumentEntity documentEntity, String content) {
+    private List<DocumentChunk> replaceChunks(Document document, String content) {
         TokenTextSplitter tokenTextSplitter = TokenTextSplitter.builder()
                 .withChunkSize(500)
                 .build();
 
-        List<Document> chunks = tokenTextSplitter.apply(List.of(new Document(content)));
+        List<org.springframework.ai.document.Document> chunks = tokenTextSplitter.apply(List.of(new org.springframework.ai.document.Document(content)));
 
-        documentChunkRepository.deleteByDocumentId(documentEntity.getId());
+        documentChunkRepository.deleteByDocumentId(document.getId());
 
         List<DocumentChunk> documentChunks = new ArrayList<>(chunks.size());
         int chunkIdx = 0;
-        for (Document chunk : chunks) {
+        for (org.springframework.ai.document.Document chunk : chunks) {
             String chunkText = chunk.getText();
             documentChunks.add(DocumentChunk.builder()
-                    .document(documentEntity)
+                    .document(document)
                     .content(chunkText)
                     .chunkIndex(chunkIdx++)
                     .tokenCount(estimateTokenCount(chunkText))
@@ -107,9 +106,9 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
         });
     }
 
-    private void markStatus(DocumentEntity documentEntity, DocumentStatus status) {
-        documentEntity.setDocumentStatus(status);
-        documentRepository.save(documentEntity);
+    private void markStatus(Document document, DocumentStatus status) {
+        document.setDocumentStatus(status);
+        documentRepository.save(document);
     }
 
     private int estimateTokenCount(String text) {

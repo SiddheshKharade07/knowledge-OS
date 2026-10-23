@@ -2,6 +2,18 @@ spring:
   application:
     name: KnowledgeOS
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${GMAIL_USERNAME}
+    password: ${GMAIL_APP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
   servlet:
     multipart:
       max-file-size: 25MB
@@ -9,7 +21,7 @@ spring:
 
   ai:
     openai:
-      api-key: ${OPENROUTER_API_KEY}
+      api-key: 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
       base-url: https://openrouter.ai/api
 
       chat:
@@ -45,6 +57,9 @@ spring:
       mode: always
       continue-on-error: true
 
+jwt:
+  secret-key: gjkfsoidfkfmvmc0wrep3rodfdssf0dsfuenfiouerohihfjheoijnfiouehrs1d65f651sdf
+
 logging:
   level:
     com.example.KnowledgeOS: DEBUG
@@ -71,3 +86,8 @@ knowledgeos:
       enabled: true
     final-context:
       top-k: 5
+
+app:
+  mail:
+    from: ${GMAIL_USERNAME}
+#  frontend-url: ${KNOWLEDGEOS_FRONTEND_URL:http://localhost:5173}

@@ -1,56 +1,112 @@
 package com.example.KnowledgeOS.exception;
 
+import io.jsonwebtoken.JwtException;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.coyote.BadRequestException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
-import java.time.Instant;
 import java.util.List;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    public record ErrorResponse(int status, String error, String message, List<String> details, Instant timestamp) {
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiError> handleResourceNotFoundException(ResourceNotFoundException exception) {
+        ApiError apiError = new ApiError(HttpStatus.NOT_FOUND, exception.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(apiError);
+    }
+
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<ApiError> handleBadRequest(BadRequestException exception) {
+        ApiError apiError = new ApiError(HttpStatus.BAD_REQUEST, exception.getMessage());
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(apiError);
     }
 
     @ExceptionHandler(DocumentNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleDocumentNotFound(DocumentNotFoundException e) {
-        return build(HttpStatus.NOT_FOUND, e.getMessage(), List.of());
+    public ResponseEntity<ApiError> handleDocumentNotFound(DocumentNotFoundException e) {
+        ApiError apiError = new ApiError(HttpStatus.NOT_FOUND, e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(apiError);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) {
-        List<String> details = e.getBindingResult().getFieldErrors().stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+    public ResponseEntity<ApiError> handleNotValid(MethodArgumentNotValidException exception) {
+
+        List<ApiFieldError> errors = exception.getBindingResult().getFieldErrors().stream()
+                .map(fieldError -> new ApiFieldError(fieldError.getField(), fieldError.getDefaultMessage()))
                 .toList();
-        return build(HttpStatus.BAD_REQUEST, "Request validation failed", details);
+
+        ApiError apiError = new ApiError(HttpStatus.BAD_REQUEST, "input validation failed", errors);
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(apiError);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException e) {
-        return build(HttpStatus.BAD_REQUEST, e.getMessage(), List.of());
+    public ResponseEntity<ApiError> handleIllegalArgument(IllegalArgumentException e) {
+        ApiError apiError = new ApiError(HttpStatus.BAD_REQUEST, e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(apiError);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException e) {
-        return build(HttpStatus.PAYLOAD_TOO_LARGE, "Uploaded file exceeds the maximum allowed size", List.of());
+    public ResponseEntity<ApiError> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        ApiError apiError = new ApiError(HttpStatus.PAYLOAD_TOO_LARGE, "uploaded file exceeds the maximum allowed size");
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(apiError);
     }
 
     @ExceptionHandler(StorageException.class)
-    public ResponseEntity<ErrorResponse> handleStorage(StorageException e) {
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Document storage or ingestion failed", List.of(e.getMessage()));
+    public ResponseEntity<ApiError> handleStorage(StorageException e) {
+        ApiError apiError = new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, "Document storage or ingestion failed");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(apiError);
     }
 
     @ExceptionHandler(RagPipelineException.class)
-    public ResponseEntity<ErrorResponse> handlePipeline(RagPipelineException e) {
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "RAG pipeline failed", List.of(e.getMessage()));
+    public ResponseEntity<ApiError> handlePipeline(RagPipelineException e) {
+        ApiError apiError = new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, "RAG pipeline failed");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(apiError);
     }
 
-    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, List<String> details) {
-        return ResponseEntity.status(status)
-                .body(new ErrorResponse(status.value(), status.getReasonPhrase(), message, details, Instant.now()));
+    @ExceptionHandler(UsernameNotFoundException.class)
+    public ResponseEntity<ApiError> handleUsernameNotFoundException(UsernameNotFoundException exception) {
+        ApiError apiError = new ApiError(HttpStatus.NOT_FOUND, "username not found with username: " + exception.getMessage());
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(apiError.status()).body(apiError);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiError> handleAuthenticationException(AuthenticationException exception) {
+        ApiError apiError = new ApiError(HttpStatus.UNAUTHORIZED, "Authentication failed: " + exception.getMessage());
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(apiError.status()).body(apiError);
+    }
+
+    @ExceptionHandler(JwtException.class)
+    public ResponseEntity<ApiError> handleJwtException(JwtException exception) {
+        ApiError apiError = new ApiError(HttpStatus.UNAUTHORIZED, "Invalid JWT token: " + exception.getMessage());
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(apiError.status()).body(apiError);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDeniedException(AccessDeniedException exception) {
+        ApiError apiError = new ApiError(HttpStatus.FORBIDDEN, "Access denied Insufficient permissions");
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(apiError.status()).body(apiError);
+    }
+
+    @ExceptionHandler(AuthorizationDeniedException.class)
+    public ResponseEntity<ApiError> handleAuthorizationDeniedException(AuthorizationDeniedException exception) {
+        ApiError apiError = new ApiError(HttpStatus.FORBIDDEN, "Access denied Insufficient permissions");
+        log.error(apiError.toString(), exception);
+        return ResponseEntity.status(apiError.status()).body(apiError);
     }
 }

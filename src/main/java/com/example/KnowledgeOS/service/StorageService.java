@@ -12,6 +12,8 @@ public interface StorageService {
 
     DocumentResponse uploadFile(MultipartFile file) throws IOException;
 
+    DocumentResponse uploadFileViaFilePath(String fileName) throws IOException;
+
     List<DocumentResponse> listDocuments();
 
     List<DocumentChunkResponse> getDocumentChunks(Long documentId);

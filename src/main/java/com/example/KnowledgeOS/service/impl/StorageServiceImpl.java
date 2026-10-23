@@ -4,14 +4,18 @@ import com.example.KnowledgeOS.config.StorageConfig;
 import com.example.KnowledgeOS.dto.DocumentChunkResponse;
 import com.example.KnowledgeOS.dto.DocumentResponse;
 import com.example.KnowledgeOS.dto.FileContentResponse;
-import com.example.KnowledgeOS.entity.DocumentEntity;
-import com.example.KnowledgeOS.entity.enums.DocumentStatus;
+import com.example.KnowledgeOS.entity.Document;
+import com.example.KnowledgeOS.entity.User;
+import com.example.KnowledgeOS.enums.DocumentStatus;
 import com.example.KnowledgeOS.exception.DocumentNotFoundException;
+import com.example.KnowledgeOS.exception.ResourceNotFoundException;
 import com.example.KnowledgeOS.exception.StorageException;
 import com.example.KnowledgeOS.mapper.DocumentChunkMapper;
 import com.example.KnowledgeOS.mapper.DocumentMapper;
 import com.example.KnowledgeOS.repository.DocumentChunkRepository;
 import com.example.KnowledgeOS.repository.DocumentRepository;
+import com.example.KnowledgeOS.repository.UserRepository;
+import com.example.KnowledgeOS.security.AuthUtil;
 import com.example.KnowledgeOS.service.StorageService;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
@@ -21,6 +25,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -43,6 +49,8 @@ public class StorageServiceImpl implements StorageService {
     private final StorageConfig storageConfig;
     private final DocumentMapper documentMapper;
     private final DocumentChunkMapper documentChunkMapper;
+    private final AuthUtil authUtil;
+    private final UserRepository userRepository;
 
     @Override
     public List<DocumentResponse> listDocuments() {
@@ -63,6 +71,8 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public DocumentResponse uploadFile(MultipartFile file) throws IOException {
+        Long userId = authUtil.getCurrentUserId();
+
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Uploaded file is empty");
         }
@@ -77,11 +87,14 @@ public class StorageServiceImpl implements StorageService {
                 ? file.getContentType()
                 : probeContentType(fileName);
 
-        DocumentEntity savedDocument = documentRepository.save(DocumentEntity.builder()
+        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("user with ID: " + userId + " not found"));
+
+        Document savedDocument = documentRepository.save(Document.builder()
                 .fileName(fileName)
                 .contentType(contentType)
                 .fileSize(fileSize)
                 .documentStatus(DocumentStatus.PROCESSING)
+                .owner(user)
                 .build());
 
         String objectName = savedDocument.getId() + "/" + fileName;
@@ -109,8 +122,59 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
+    public DocumentResponse uploadFileViaFilePath(String fileName) throws IOException {
+        Long userId = authUtil.getCurrentUserId();
+
+        if (fileName == null || fileName.isBlank()) {
+            throw new IllegalArgumentException("File name is required");
+        }
+
+        String resolvedName = Path.of(fileName).getFileName().toString();
+        ClassPathResource resource = new ClassPathResource("static/" + resolvedName);
+        if (!resource.exists()) {
+            throw new IllegalArgumentException("File not found in resources/static: " + resolvedName);
+        }
+
+        long fileSize = resource.contentLength();
+        String contentType = probeContentType(resolvedName);
+
+        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("user with userID: " + userId + " not found"));
+
+        Document savedDocument = documentRepository.save(Document.builder()
+                .fileName(resolvedName)
+                .contentType(contentType)
+                .fileSize(fileSize)
+                .documentStatus(DocumentStatus.PROCESSING)
+                        .owner(user)
+                .build());
+
+        String objectName = savedDocument.getId() + "/" + resolvedName;
+
+        try (InputStream inputStream = resource.getInputStream()) {
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .contentType(contentType)
+                            .bucket(storageConfig.getBucket())
+                            .object(objectName)
+                            .stream(inputStream, fileSize, -1)
+                            .build()
+            );
+        } catch (Exception exception) {
+            log.error("Failed to upload file: {}", resolvedName, exception);
+            markFailed(savedDocument);
+            throw new StorageException("Failed to upload file: " + resolvedName, exception);
+        }
+
+        savedDocument.setDocumentStatus(DocumentStatus.UPLOADED);
+        savedDocument.setMinioObjectKey(objectName);
+        savedDocument = documentRepository.save(savedDocument);
+
+        return documentMapper.toResponse(savedDocument);
+    }
+
+    @Override
     public FileContentResponse getFileContent(Long documentId) {
-        DocumentEntity file = documentRepository.findById(documentId)
+        Document file = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 
         try {
@@ -144,7 +208,7 @@ public class StorageServiceImpl implements StorageService {
         }
     }
 
-    private void markFailed(DocumentEntity document) {
+    private void markFailed(Document document) {
         document.setDocumentStatus(DocumentStatus.FAILED);
         documentRepository.save(document);
     }
