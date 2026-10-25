@@ -23,10 +23,14 @@ public class HybridRetrievalServiceImpl implements HybridRetrievalService {
     private final HybridFusionService hybridFusionService;
     private final Reranker reranker;
     private final RagProperties ragProperties;
+    private final com.example.KnowledgeOS.service.DocumentAccessService documentAccessService;
 
     @Override
     public RetrievalResult retrieve(String userQuery) {
         log.info("Starting hybrid retrieval pipeline for query: '{}'", userQuery);
+
+        com.example.KnowledgeOS.entity.User currentUser = documentAccessService.getCurrentUser();
+        java.util.Set<Long> departmentIds = documentAccessService.getCurrentUserDepartmentIds();
 
         // 1. Query Analysis
         QueryAnalysisResponse analysis = queryAnalysisService.analyze(userQuery);
@@ -41,9 +45,9 @@ public class HybridRetrievalServiceImpl implements HybridRetrievalService {
         List<RetrievalCandidate> semanticCandidates;
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<List<RetrievalCandidate>> lexicalFuture =
-                    executor.submit(() -> lexicalSearchService.search(userQuery, searchTerms, lexicalTopK));
+                    executor.submit(() -> lexicalSearchService.search(userQuery, searchTerms, lexicalTopK, currentUser.getId(), departmentIds));
             Future<List<RetrievalCandidate>> semanticFuture =
-                    executor.submit(() -> semanticSearchService.search(userQuery, similarityThreshold, semanticTopK));
+                    executor.submit(() -> semanticSearchService.search(userQuery, similarityThreshold, semanticTopK, currentUser.getId(), departmentIds));
 
             lexicalCandidates = lexicalFuture.get();
             semanticCandidates = semanticFuture.get();

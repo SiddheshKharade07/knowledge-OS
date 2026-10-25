@@ -51,16 +51,27 @@ public class StorageServiceImpl implements StorageService {
     private final DocumentChunkMapper documentChunkMapper;
     private final AuthUtil authUtil;
     private final UserRepository userRepository;
+    private final com.example.KnowledgeOS.service.DocumentAccessService documentAccessService;
 
     @Override
     public List<DocumentResponse> listDocuments() {
-        return documentRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(documentMapper::toResponse)
-                .toList();
+        try {
+            com.example.KnowledgeOS.entity.User currentUser = documentAccessService.getCurrentUser();
+            java.util.Set<Long> departmentIds = documentAccessService.getCurrentUserDepartmentIds();
+            List<Long> deptIdList = departmentIds == null || departmentIds.isEmpty()
+                    ? java.util.List.of(-1L)
+                    : new java.util.ArrayList<>(departmentIds);
+            return documentRepository.findAllAccessible(currentUser.getId(), deptIdList).stream()
+                    .map(documentMapper::toResponse)
+                    .toList();
+        } catch (Exception e) {
+            return java.util.List.of();
+        }
     }
 
     @Override
     public List<DocumentChunkResponse> getDocumentChunks(Long documentId) {
+        documentAccessService.ensureAccessible(documentId);
         if (!documentRepository.existsById(documentId)) {
             throw new DocumentNotFoundException(documentId);
         }
@@ -174,6 +185,7 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     public FileContentResponse getFileContent(Long documentId) {
+        documentAccessService.ensureAccessible(documentId);
         Document file = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 

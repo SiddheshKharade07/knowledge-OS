@@ -20,9 +20,21 @@ public class LexicalSearchServiceImpl implements LexicalSearchService {
 
     @Override
     public List<RetrievalCandidate> search(String userQuery, List<String> searchTerms, int topK) {
+        return search(userQuery, searchTerms, topK, null, Collections.emptySet());
+    }
+
+    @Override
+    public List<RetrievalCandidate> search(String userQuery, List<String> searchTerms, int topK, Long userId, Set<Long> departmentIds) {
         if (topK <= 0) {
             return List.of();
         }
+        if (userId == null) {
+            return List.of();
+        }
+
+        List<Long> deptIdList = departmentIds == null || departmentIds.isEmpty()
+                ? List.of(-1L)
+                : new ArrayList<>(departmentIds);
 
         Map<Long, ChunkSearchResultProjection> projectionsById = new LinkedHashMap<>();
 
@@ -34,7 +46,7 @@ public class LexicalSearchServiceImpl implements LexicalSearchService {
         if (combinedQueryText != null && !combinedQueryText.isBlank()) {
             try {
                 List<ChunkSearchResultProjection> webResults =
-                        documentChunkRepository.searchLexicalWebsearch(combinedQueryText, topK);
+                        documentChunkRepository.searchLexicalWebsearch(combinedQueryText, topK, userId, deptIdList);
                 for (ChunkSearchResultProjection proj : webResults) {
                     projectionsById.putIfAbsent(proj.getChunkId(), proj);
                 }
@@ -49,7 +61,7 @@ public class LexicalSearchServiceImpl implements LexicalSearchService {
             if (!tsQuery.isBlank()) {
                 try {
                     List<ChunkSearchResultProjection> tsResults =
-                            documentChunkRepository.searchLexicalTsQuery(tsQuery, topK);
+                            documentChunkRepository.searchLexicalTsQuery(tsQuery, topK, userId, deptIdList);
                     for (ChunkSearchResultProjection proj : tsResults) {
                         projectionsById.putIfAbsent(proj.getChunkId(), proj);
                     }

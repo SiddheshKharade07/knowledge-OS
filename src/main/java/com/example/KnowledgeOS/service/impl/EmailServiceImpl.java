@@ -87,6 +87,53 @@ public class EmailServiceImpl implements EmailService {
         sendEmail(recipientEmail, subject, body);
     }
 
+    @Override
+    public void sendPasswordSetupEmail(String recipientEmail, String username, String setupLink) {
+        String subject = "Set up your KnowledgeOS password";
+
+        String body = """
+                Hello %s,
+                
+                A KnowledgeOS account has been created for you.
+                
+                Use the link below to set your password:
+                %s
+                
+                This link is time-limited and can be used only once.
+                
+                If you did not expect this invitation, please contact your administrator.
+                
+                Regards,
+                KnowledgeOS Team
+                """.formatted(username, setupLink);
+
+        sendEmail(recipientEmail, subject, body);
+    }
+
+    @Override
+    public void sendPasswordResetEmail(String recipientEmail, String username, String resetLink) {
+        String subject = "Reset your KnowledgeOS password";
+
+        String body = """
+                Hello %s,
+                
+                We received a request to reset the password for your KnowledgeOS account.
+                
+                Use the link below to reset your password:
+                %s
+                
+                This link is time-limited and can be used only once.
+                
+                If you did not request a password reset, you can ignore this message.
+                
+                Regards,
+                KnowledgeOS Team
+                """.formatted(username, resetLink);
+
+        sendEmail(recipientEmail, subject, body);
+    }
+
+    @Override
     public void sendPasswordChangedEmail(
             String recipientEmail,
             String username) {

@@ -28,12 +28,22 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
             FROM document_chunks c
             JOIN documents d ON c.document_id = d.id
             WHERE c.tsv @@ websearch_to_tsquery('english', :query)
+              AND (
+                    d.owner = :userId
+                 OR EXISTS (
+                        SELECT 1 FROM document_departments dd
+                        WHERE dd.document_id = d.id
+                          AND dd.department_id IN (:departmentIds)
+                    )
+              )
             ORDER BY score DESC
             LIMIT :topK
             """, nativeQuery = true)
     List<ChunkSearchResultProjection> searchLexicalWebsearch(
             @Param("query") String query,
-            @Param("topK") int topK
+            @Param("topK") int topK,
+            @Param("userId") Long userId,
+            @Param("departmentIds") List<Long> departmentIds
     );
 
     @Query(value = """
@@ -46,12 +56,22 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
             FROM document_chunks c
             JOIN documents d ON c.document_id = d.id
             WHERE c.tsv @@ to_tsquery('english', :tsQuery)
+              AND (
+                    d.owner = :userId
+                 OR EXISTS (
+                        SELECT 1 FROM document_departments dd
+                        WHERE dd.document_id = d.id
+                          AND dd.department_id IN (:departmentIds)
+                    )
+              )
             ORDER BY score DESC
             LIMIT :topK
             """, nativeQuery = true)
     List<ChunkSearchResultProjection> searchLexicalTsQuery(
             @Param("tsQuery") String tsQuery,
-            @Param("topK") int topK
+            @Param("topK") int topK,
+            @Param("userId") Long userId,
+            @Param("departmentIds") List<Long> departmentIds
     );
 
     @Query(value = """
@@ -65,12 +85,22 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
             JOIN documents d ON c.document_id = d.id
             WHERE c.embedding IS NOT NULL
               AND (1.0 - (c.embedding <=> CAST(:vectorStr AS vector))) >= :similarityThreshold
+              AND (
+                    d.owner = :userId
+                 OR EXISTS (
+                        SELECT 1 FROM document_departments dd
+                        WHERE dd.document_id = d.id
+                          AND dd.department_id IN (:departmentIds)
+                    )
+              )
             ORDER BY (c.embedding <=> CAST(:vectorStr AS vector)) ASC
             LIMIT :topK
             """, nativeQuery = true)
     List<ChunkSearchResultProjection> searchSemanticVector(
             @Param("vectorStr") String vectorStr,
             @Param("similarityThreshold") double similarityThreshold,
-            @Param("topK") int topK
+            @Param("topK") int topK,
+            @Param("userId") Long userId,
+            @Param("departmentIds") List<Long> departmentIds
     );
 }

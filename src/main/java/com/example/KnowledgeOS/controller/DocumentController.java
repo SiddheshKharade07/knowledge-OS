@@ -23,6 +23,7 @@ public class DocumentController {
     private final StorageService storageService;
     private final DocumentIngestionService documentIngestionService;
 
+    @org.springframework.security.access.prepost.PreAuthorize("@security.canManageMembers() or @security.canManageDepartments()")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<DocumentResponse> upload(@RequestParam("file") MultipartFile file)
             throws IOException {
@@ -30,6 +31,7 @@ public class DocumentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("@security.canManageMembers() or @security.canManageDepartments()")
     @PostMapping("/upload/{fileName}")
     public ResponseEntity<DocumentResponse> uploadDoc(@PathVariable String fileName) throws IOException {
         DocumentResponse documentResponse = storageService.uploadFileViaFilePath(fileName);
@@ -41,6 +43,7 @@ public class DocumentController {
         return ResponseEntity.ok(storageService.listDocuments());
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("@security.canManageMembers() or @security.canManageDepartments()")
     @PostMapping("/{id}/ingest")
     public ResponseEntity<Void> ingest(@PathVariable Long id) {
         documentIngestionService.ingest(id);

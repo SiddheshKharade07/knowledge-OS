@@ -18,7 +18,13 @@ public interface UserMapper {
     )
     UserProfileResponse toUserProfileResponse(User user);
 
+    @Mapping(target = "departments", ignore = true)
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "password", ignore = true)
+    @Mapping(target = "active", ignore = true)
     User toEntity(CreateUserRequest createUserRequest);
 
+
     UserSummaryResponse toUserSummaryResponse(User user);
+
 }

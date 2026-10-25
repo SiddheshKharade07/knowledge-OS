@@ -8,6 +8,10 @@ public record RagDebugInfo(
         List<RetrievalCandidate> lexicalCandidates,
         List<RetrievalCandidate> semanticCandidates,
         List<RetrievalCandidate> fusedCandidates,
-        List<RankedChunk> rerankedCandidates
+        List<RankedChunk> rerankedCandidates,
+        EvidenceSupportIndicator evidenceSupportIndicator
 ) {
+    public RagDebugInfo(String originalQuery, List<String> searchTerms, List<RetrievalCandidate> lexicalCandidates, List<RetrievalCandidate> semanticCandidates, List<RetrievalCandidate> fusedCandidates, List<RankedChunk> rerankedCandidates) {
+        this(originalQuery, searchTerms, lexicalCandidates, semanticCandidates, fusedCandidates, rerankedCandidates, null);
+    }
 }

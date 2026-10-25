@@ -15,6 +15,10 @@ public class SecurityExpressions {
     private boolean hasPermission(SystemPermission systemPermission) {
         Long userId = authUtil.getCurrentUserId();
 
+        if (userId == null) {
+            return false;
+        }
+
         return userRepository.findRoleByUserId(userId)
                 .map(role -> role.getPermissions().contains(systemPermission))
                 .orElse(false);
@@ -24,7 +28,24 @@ public class SecurityExpressions {
         return hasPermission(SystemPermission.MANAGE_DEPARTMENTS);
     }
 
+    public boolean canManageDepartments() {
+        return hasPermission(SystemPermission.MANAGE_DEPARTMENTS);
+    }
+
     public boolean canManageMembers() {
         return hasPermission(SystemPermission.MANAGE_USERS);
     }
+
+    public boolean canManageUsers() {
+        return hasPermission(SystemPermission.MANAGE_USERS);
+    }
+
+    public boolean canManageRoles() {
+        return hasPermission(SystemPermission.MANAGE_ROLES);
+    }
+
+    public boolean canManageSystemSettings() {
+        return hasPermission(SystemPermission.MANAGE_SYSTEM_SETTINGS);
+    }
 }
+

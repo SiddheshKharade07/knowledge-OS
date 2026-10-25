@@ -11,7 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -23,9 +25,18 @@ public class SemanticSearchServiceImpl implements SemanticSearchService {
 
     @Override
     public List<RetrievalCandidate> search(String userQuery, double similarityThreshold, int topK) {
-        if (userQuery == null || userQuery.isBlank() || topK <= 0) {
+        return search(userQuery, similarityThreshold, topK, null, Collections.emptySet());
+    }
+
+    @Override
+    public List<RetrievalCandidate> search(String userQuery, double similarityThreshold, int topK, Long userId, Set<Long> departmentIds) {
+        if (userQuery == null || userQuery.isBlank() || topK <= 0 || userId == null) {
             return List.of();
         }
+
+        List<Long> deptIdList = departmentIds == null || departmentIds.isEmpty()
+                ? List.of(-1L)
+                : new ArrayList<>(departmentIds);
 
         try {
             float[] embedding = aiService.getVectorEmbedding(userQuery);
@@ -37,7 +48,7 @@ public class SemanticSearchServiceImpl implements SemanticSearchService {
             String vectorStr = VectorUtils.toPgVectorString(embedding);
 
             List<ChunkSearchResultProjection> projections =
-                    documentChunkRepository.searchSemanticVector(vectorStr, similarityThreshold, topK);
+                    documentChunkRepository.searchSemanticVector(vectorStr, similarityThreshold, topK, userId, deptIdList);
 
             List<RetrievalCandidate> candidates = new ArrayList<>();
             for (int i = 0; i < projections.size(); i++) {

@@ -14,12 +14,12 @@ public interface EmailService {
             String username,
             boolean active);
 
+    void sendPasswordSetupEmail(String recipientEmail, String username, String setupLink);
+
+    void sendPasswordResetEmail(String recipientEmail, String username, String resetLink);
+
     void sendPasswordChangedEmail(
             String recipientEmail,
             String username);
-
-    private void sendEmail(
-            String recipientEmail,
-            String subject,
-            String body){}
 }
+
