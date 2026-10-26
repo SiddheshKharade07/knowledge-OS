@@ -198,7 +198,6 @@ public class ChatServiceImpl implements ChatService {
                 if (requestedSessionId != null) {
                     session = chatSessionRepository.findByIdAndUserId(requestedSessionId, userId)
                             .orElseThrow(() -> new ResourceNotFoundException("Chat session not found"));
-                    org.hibernate.Hibernate.initialize(session.getMessages());
                 } else {
                     ChatSession newSession = ChatSession.builder()
                             .user(user)
@@ -214,6 +213,9 @@ public class ChatServiceImpl implements ChatService {
                         .content(messageText)
                         .build();
                 userMessage = chatMessageRepository.save(userMessage);
+                if (session.getMessages() == null) {
+                    session.setMessages(new ArrayList<>());
+                }
                 session.getMessages().add(userMessage);
 
                 if (session.getTitle() == null || session.getTitle().isBlank() || "New chat".equals(session.getTitle())) {
