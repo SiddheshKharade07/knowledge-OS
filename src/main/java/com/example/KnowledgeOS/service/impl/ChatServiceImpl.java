@@ -262,6 +262,9 @@ public class ChatServiceImpl implements ChatService {
                                             .metadataJson(metadataJson)
                                             .build();
                                     assistantMessage = chatMessageRepository.save(assistantMessage);
+                                    if (session.getMessages() == null) {
+                                        session.setMessages(new ArrayList<>());
+                                    }
                                     session.getMessages().add(assistantMessage);
                                     chatSessionRepository.save(session);
                                     emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
