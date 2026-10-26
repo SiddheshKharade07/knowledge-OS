@@ -84,7 +84,9 @@ export default function ChatPage() {
   const [streaming, setStreaming] = React.useState(false);
   const [streamContent, setStreamContent] = React.useState('');
   const [streamCitations, setStreamCitations] = React.useState<any[]>([]);
+  const [streamError, setStreamError] = React.useState<string | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
+  const streamSessionRef = React.useRef<number | null>(null);
 
   const sendMessage = useMutation({
     mutationFn: async (payload: string) => {
@@ -94,6 +96,8 @@ export default function ChatPage() {
       setStreaming(true);
       setStreamContent('');
       setStreamCitations([]);
+      setStreamError(null);
+      streamSessionRef.current = sessionId;
       const controller = new AbortController();
       abortRef.current = controller;
       try {
@@ -101,8 +105,8 @@ export default function ChatPage() {
           { sessionId, message: payload },
           {
             onMeta: (data) => {
-              if (sessionId === null && data?.sessionId) {
-                navigate(`/chat/${data.sessionId}`, { replace: true });
+              if (data?.sessionId) {
+                streamSessionRef.current = data.sessionId;
               }
             },
             onContent: (chunk) => {
@@ -116,34 +120,72 @@ export default function ChatPage() {
               setPendingMessage(null);
               setStreamContent('');
               setStreamCitations([]);
+              setStreamError(null);
               queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
               if (data?.sessionId) {
                 queryClient.invalidateQueries({ queryKey: ['chat', 'session', data.sessionId] });
+                if (sessionId === null) {
+                  navigate(`/chat/${data.sessionId}`, { replace: true });
+                }
               }
               abortRef.current = null;
             },
             onError: (err) => {
+              const message = err || 'Failed to send message';
               setStreaming(false);
+              setStreamError(message);
+              toast.error(message);
+              if (streamSessionRef.current) {
+                queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+                queryClient.invalidateQueries({ queryKey: ['chat', 'session', streamSessionRef.current] });
+                if (sessionId === null) {
+                  navigate(`/chat/${streamSessionRef.current}`, { replace: true });
+                }
+              }
               setPendingMessage(null);
-              setStreamContent('');
-              setStreamCitations([]);
-              toast.error(err || 'Failed to send message');
               abortRef.current = null;
             },
           },
           controller.signal,
         );
       } catch (err: any) {
+        const aborted = err?.name === 'AbortError';
         setStreaming(false);
-        setPendingMessage(null);
-        setStreamContent('');
-        setStreamCitations([]);
-        toast.error(err?.message || 'Failed to send message');
+        if (aborted) {
+          setStreamError('Generation stopped.');
+          if (streamSessionRef.current) {
+            queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+            queryClient.invalidateQueries({ queryKey: ['chat', 'session', streamSessionRef.current] });
+            if (sessionId === null) {
+              navigate(`/chat/${streamSessionRef.current}`, { replace: true });
+            }
+          }
+          setPendingMessage(null);
+        } else {
+          const message = err?.message || 'Failed to send message';
+          setStreamError(message);
+          toast.error(message);
+          if (streamSessionRef.current) {
+            queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+            queryClient.invalidateQueries({ queryKey: ['chat', 'session', streamSessionRef.current] });
+            if (sessionId === null) {
+              navigate(`/chat/${streamSessionRef.current}`, { replace: true });
+            }
+          }
+          setPendingMessage(null);
+        }
         abortRef.current = null;
-        throw err;
+        if (!aborted) throw err;
       }
     },
   });
+
+  const stopGenerating = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
+  };
+
 
   const messages: ChatMessage[] = React.useMemo(() => {
     const base = sessionQuery.data?.messages ?? [];
@@ -154,6 +196,24 @@ export default function ChatPage() {
     if (userScrolledUp) return;
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, pendingMessage, streamContent, userScrolledUp]);
+
+  React.useEffect(() => {
+    const activeStreamSession = streamSessionRef.current;
+    if (activeStreamSession !== null && sessionId !== activeStreamSession) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      streamSessionRef.current = null;
+      setStreaming(false);
+      setStreamContent('');
+      setStreamCitations([]);
+      setStreamError(null);
+      setPendingMessage(null);
+    }
+    if (sessionId === null) {
+      setStreamContent('');
+      setStreamError(null);
+    }
+  }, [sessionId]);
 
   React.useEffect(() => {
     const el = scrollContainerRef.current;
@@ -343,7 +403,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : null}
-              {(streaming && streamContent.length === 0) && pendingMessage ? (
+              {(streaming && streamContent.length === 0) ? (
                 <div className="flex justify-start">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-xs text-on-surface-variant">
@@ -353,7 +413,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : null}
-              {streaming && streamContent.length > 0 ? (
+              {streamContent.length > 0 ? (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] space-y-2">
                     <div className="flex items-center gap-2 text-xs text-on-surface-variant">
@@ -363,12 +423,30 @@ export default function ChatPage() {
                       <div className="prose prose-sm max-w-none whitespace-pre-wrap break-words">
                         {streamContent}
                       </div>
-                      <div className="mt-2 flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.3s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.15s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant" />
-                      </div>
+                      {streaming ? (
+                        <div className="mt-2 flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.3s]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.15s]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant" />
+                        </div>
+                      ) : null}
                     </div>
+                    {streamCitations.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {streamCitations.slice(0, 6).map((c: any, idx: number) => (
+                          <span
+                            key={`${c.chunkId}-${idx}`}
+                            className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2 py-0.5 text-xs text-on-surface-variant"
+                          >
+                            <FileText className="h-3 w-3" />
+                            [{idx + 1}] {c.documentName}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!streaming && streamError ? (
+                      <p className="text-xs text-error">{streamError}</p>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -393,6 +471,11 @@ export default function ChatPage() {
             <Button type="submit" size="icon" disabled={!message.trim() || streaming}>
               <Send className="h-4 w-4" />
             </Button>
+            {streaming ? (
+              <Button type="button" size="sm" variant="outline" onClick={stopGenerating} title="Stop generating">
+                Stop
+              </Button>
+            ) : null}
           </form>
           <p className="mt-1 text-center text-[11px] text-on-surface-variant/70">
             Answers are grounded in your organization's processed documents.

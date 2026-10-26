@@ -33,7 +33,6 @@ export default function EditUserPage() {
     userRole: 'USER' as UserRole,
     departmentIds: [] as number[],
   });
-  const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [deptOpen, setDeptOpen] = React.useState(false);
   const [deptSearch, setDeptSearch] = React.useState('');
   const [roleOpen, setRoleOpen] = React.useState(false);
@@ -107,10 +106,6 @@ export default function EditUserPage() {
     return d.name.toLowerCase().includes(deptSearch.toLowerCase());
   });
   const selectedDepts = departments.filter((d: any) => form.departmentIds.includes(d.id));
-
-  const validate = () => {
-    return true;
-  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

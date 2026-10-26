@@ -4,6 +4,7 @@ import com.example.KnowledgeOS.dto.ChatMessageDto;
 import com.example.KnowledgeOS.dto.ChatMessageResponse;
 import com.example.KnowledgeOS.dto.ChatSessionDto;
 import com.example.KnowledgeOS.dto.Citation;
+import com.example.KnowledgeOS.dto.JwtUserPrinciples;
 import com.example.KnowledgeOS.dto.RagResponse;
 import com.example.KnowledgeOS.dto.request.RenameChatSessionRequest;
 import com.example.KnowledgeOS.dto.request.SendChatMessageRequest;
@@ -21,12 +22,22 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Slf4j
 @Service
@@ -172,142 +183,185 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
-    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamMessage(SendChatMessageRequest request) {
+    public SseEmitter streamMessage(SendChatMessageRequest request) {
         if (request == null || request.message() == null || request.message().trim().isEmpty()) {
             throw new IllegalArgumentException("message is required");
         }
-        final Long authenticatedUserId = authUtil.getCurrentUserId();
-        if (authenticatedUserId == null) {
-            throw new org.springframework.security.authentication.AuthenticationCredentialsNotFoundException("no JWT found");
+
+        // Authenticate on the request thread. Failures here are handled by the
+        // global exception handler and produce a regular JSON error response.
+        final Long userId = authUtil.getCurrentUserId();
+        if (userId == null) {
+            throw new AuthenticationCredentialsNotFoundException("no JWT found");
         }
-        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(300000L);
-        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+        final Authentication currentAuthentication = SecurityContextHolder.getContext().getAuthentication();
+        final String username = currentAuthentication != null
+                && currentAuthentication.getPrincipal() instanceof JwtUserPrinciples principal
+                ? principal.username()
+                : "";
+        final List<GrantedAuthority> authorities = currentAuthentication == null
+                ? new ArrayList<>()
+                : new ArrayList<>(currentAuthentication.getAuthorities());
+
         final String messageText = request.message();
         final Long requestedSessionId = request.sessionId();
-        final Long userId = authenticatedUserId;
+        final SseEmitter emitter = new SseEmitter(300_000L);
+        final ExecutorService executor = Executors.newSingleThreadExecutor();
+
         executor.execute(() -> {
             try {
-                org.springframework.security.core.context.SecurityContext ctx = org.springframework.security.core.context.SecurityContextHolder.createEmptyContext();
-                org.springframework.security.authentication.UsernamePasswordAuthenticationToken auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(userId.toString(), null, java.util.List.of());
-                ctx.setAuthentication(auth);
-                org.springframework.security.core.context.SecurityContextHolder.setContext(ctx);
+                // The RAG pipeline reads the caller from the SecurityContext, so the
+                // worker thread needs a real JWT principal, not just an id.
+                SecurityContext context = SecurityContextHolder.createEmptyContext();
+                context.setAuthentication(new UsernamePasswordAuthenticationToken(
+                        new JwtUserPrinciples(userId, username, authorities), null, authorities));
+                SecurityContextHolder.setContext(context);
+
                 User user = userRepository.findById(userId)
                         .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
                 final ChatSession session;
+                String title;
                 if (requestedSessionId != null) {
                     session = chatSessionRepository.findByIdAndUserId(requestedSessionId, userId)
                             .orElseThrow(() -> new ResourceNotFoundException("Chat session not found"));
+                    title = session.getTitle();
                 } else {
-                    ChatSession newSession = ChatSession.builder()
+                    title = generateTitle(messageText);
+                    session = chatSessionRepository.save(ChatSession.builder()
                             .user(user)
-                            .title(generateTitle(messageText))
-                            .messages(new ArrayList<>())
-                            .build();
-                    session = chatSessionRepository.save(newSession);
+                            .title(title)
+                            .build());
                 }
 
-                ChatMessage userMessage = ChatMessage.builder()
+                // Persist messages through the repository only. The worker thread has no
+                // Hibernate session, so mutating session.getMessages() would fail lazily.
+                ChatMessage userMessage = chatMessageRepository.save(ChatMessage.builder()
                         .session(session)
                         .role("USER")
                         .content(messageText)
-                        .build();
-                userMessage = chatMessageRepository.save(userMessage);
-                if (session.getMessages() == null) {
-                    session.setMessages(new ArrayList<>());
-                }
-                session.getMessages().add(userMessage);
+                        .build());
 
-                if (session.getTitle() == null || session.getTitle().isBlank() || "New chat".equals(session.getTitle())) {
-                    session.setTitle(generateTitle(messageText));
+                if (title == null || title.isBlank() || "New chat".equals(title)) {
+                    title = generateTitle(messageText);
+                    chatSessionRepository.updateTitle(session.getId(), title);
                 }
-                chatSessionRepository.save(session);
 
-                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                final Long sessionId = session.getId();
+                final String sessionTitle = title;
+
+                emitter.send(SseEmitter.event()
                         .name("meta")
-                        .data(Map.of("sessionId", session.getId(), "userMessageId", userMessage.getId(), "title", session.getTitle())));
+                        .data(Map.of(
+                                "sessionId", sessionId,
+                                "userMessageId", userMessage.getId(),
+                                "title", sessionTitle)));
 
                 StringBuilder answerBuilder = new StringBuilder();
-                java.util.List<com.example.KnowledgeOS.dto.Citation> citationsList = new java.util.ArrayList<>();
+                List<Citation> citationsList = new ArrayList<>();
 
                 ragPipelineService.queryStream(messageText)
                         .doOnNext(event -> {
                             try {
-                                if ("content".equals(event.type()) && event.content() != null) {
-                                    answerBuilder.append(event.content());
-                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                                            .name("content")
-                                            .data(event.content()));
-                                } else if ("citations".equals(event.type()) && event.data() instanceof java.util.List<?> list) {
-                                    for (Object o : list) {
-                                        if (o instanceof com.example.KnowledgeOS.dto.Citation c) {
-                                            citationsList.add(c);
+                                switch (event.type()) {
+                                    case "content" -> {
+                                        if (event.content() != null) {
+                                            answerBuilder.append(event.content());
+                                            emitter.send(SseEmitter.event()
+                                                    .name("content")
+                                                    .data(Map.of("content", event.content())));
                                         }
                                     }
-                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                                            .name("citations")
-                                            .data(citationsList));
-                                } else if ("done".equals(event.type())) {
-                                    String fullAnswer = answerBuilder.toString();
-                                    if (fullAnswer.isBlank()) {
-                                        fullAnswer = "I'm sorry, but the retrieved document context does not contain sufficient information to answer your question.";
+                                    case "citations" -> {
+                                        if (event.data() instanceof List<?> list) {
+                                            for (Object item : list) {
+                                                if (item instanceof Citation citation) {
+                                                    citationsList.add(citation);
+                                                }
+                                            }
+                                        }
+                                        emitter.send(SseEmitter.event()
+                                                .name("citations")
+                                                .data(Map.of("citations", citationsList)));
                                     }
-                                    String citationsJson = toJson(citationsList);
-                                    String metadataJson = toJson(Map.of("query", messageText));
-                                    ChatMessage assistantMessage = ChatMessage.builder()
-                                            .session(session)
-                                            .role("ASSISTANT")
-                                            .content(fullAnswer)
-                                            .citationsJson(citationsJson)
-                                            .metadataJson(metadataJson)
-                                            .build();
-                                    assistantMessage = chatMessageRepository.save(assistantMessage);
-                                    if (session.getMessages() == null) {
-                                        session.setMessages(new ArrayList<>());
+                                    case "done" -> completeStream(
+                                            emitter, session, sessionId, sessionTitle,
+                                            messageText, answerBuilder, citationsList);
+                                    default -> {
+                                        // Unknown event types are ignored on purpose.
                                     }
-                                    session.getMessages().add(assistantMessage);
-                                    chatSessionRepository.save(session);
-                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                                            .name("done")
-                                            .data(Map.of("messageId", assistantMessage.getId(), "sessionId", session.getId(), "title", session.getTitle())));
-                                    emitter.complete();
                                 }
-                            } catch (Exception ex) {
-                                log.error("Error streaming chat", ex);
-                                try {
-                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                                            .name("error")
-                                            .data(ex.getMessage() != null ? ex.getMessage() : "Stream error"));
-                                } catch (Exception ignored) {
-                                }
-                                emitter.completeWithError(ex);
+                            } catch (IOException ioException) {
+                                // Client went away; abort generation by propagating the error.
+                                throw reactor.core.Exceptions.propagate(ioException);
                             }
                         })
-                        .doOnError(ex -> {
-                            log.error("Stream error", ex);
-                            try {
-                                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                                        .name("error")
-                                        .data(ex.getMessage() != null ? ex.getMessage() : "Stream error"));
-                            } catch (Exception ignored) {
-                            }
-                            emitter.completeWithError(ex);
-                        })
+                        .doOnError(ex -> handleStreamError(emitter, ex))
+                        .onErrorResume(ex -> reactor.core.publisher.Flux.empty())
                         .blockLast();
             } catch (Exception ex) {
-                log.error("Failed to start chat stream", ex);
-                try {
-                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                            .name("error")
-                            .data(ex.getMessage() != null ? ex.getMessage() : "Stream error"));
-                } catch (Exception ignored) {
+                if (ex instanceof ResourceNotFoundException || ex instanceof IllegalArgumentException) {
+                    log.warn("Chat stream rejected: {}", ex.getMessage());
+                } else {
+                    log.error("Failed to start chat stream", ex);
                 }
-                emitter.completeWithError(ex);
+                handleStreamError(emitter, ex);
             } finally {
+                SecurityContextHolder.clearContext();
                 executor.shutdown();
             }
         });
+
         return emitter;
+    }
+
+    private void completeStream(SseEmitter emitter,
+                                ChatSession session,
+                                Long sessionId,
+                                String sessionTitle,
+                                String messageText,
+                                StringBuilder answerBuilder,
+                                List<Citation> citationsList) throws IOException {
+        String fullAnswer = answerBuilder.toString();
+        if (fullAnswer.isBlank()) {
+            fullAnswer = "I'm sorry, but the retrieved document context does not contain sufficient information to answer your question.";
+        }
+
+        ChatMessage assistantMessage = chatMessageRepository.save(ChatMessage.builder()
+                .session(session)
+                .role("ASSISTANT")
+                .content(fullAnswer)
+                .citationsJson(toJson(citationsList))
+                .metadataJson(toJson(Map.of("query", messageText)))
+                .build());
+        chatSessionRepository.touch(sessionId, java.time.Instant.now());
+
+        emitter.send(SseEmitter.event()
+                .name("done")
+                .data(Map.of(
+                        "messageId", assistantMessage.getId(),
+                        "sessionId", sessionId,
+                        "title", sessionTitle)));
+        emitter.complete();
+    }
+
+    private void handleStreamError(SseEmitter emitter, Throwable ex) {
+        String message = ex.getMessage() != null ? ex.getMessage() : "Stream error";
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("error")
+                    .data(Map.of("message", message)));
+        } catch (Exception sendFailure) {
+            log.debug("Could not send SSE error event: {}", sendFailure.getMessage());
+        }
+        // Complete normally so the container does not perform an ERROR dispatch on an
+        // already committed response (which would fail authorization a second time).
+        try {
+            emitter.complete();
+        } catch (Exception ignored) {
+            // Already completed or closed by the client.
+        }
     }
 
     private String generateTitle(String message) {

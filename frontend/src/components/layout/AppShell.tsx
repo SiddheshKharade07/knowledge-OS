@@ -2,10 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bot,
   Building2,
-  ChevronLeft,
-  ChevronRight,
   FileText,
-  GripVertical,
   LogOut,
   Menu,
   PanelLeftClose,

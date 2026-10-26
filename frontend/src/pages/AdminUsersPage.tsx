@@ -125,39 +125,6 @@ export default function AdminUsersPage() {
     setCreateOpen(true);
   };
 
-  const openEdit = async (u: UserSummary & { departmentIds?: number[] | null }) => {
-    setEditingUser(u);
-    let deptIds: number[] = [];
-    try {
-      const full = await usersApi.get(u.id);
-      const f = full as any;
-      if (f.departmentIds) {
-        const ids = f.departmentIds;
-        deptIds = Array.isArray(ids) ? ids.map((x: any) => Number(x)) : Array.from(ids).map((x: any) => Number(x));
-      } else if (f.departments) {
-        if (Array.isArray(f.departments) && typeof f.departments[0] === 'object') {
-          deptIds = f.departments.map((d: any) => Number(d.id)).filter(Boolean);
-        } else {
-          deptIds = f.departments.map((x: any) => Number(x));
-        }
-      }
-    } catch {
-      const uu = u as any;
-      if (uu.departmentIds) {
-        const ids = uu.departmentIds;
-        deptIds = Array.isArray(ids) ? ids.map((x: any) => Number(x)) : Array.from(ids).map((x: any) => Number(x));
-      } else if (uu.departments) {
-        if (Array.isArray(uu.departments) && typeof uu.departments[0] === 'object') {
-          deptIds = uu.departments.map((d: any) => Number(d.id)).filter(Boolean);
-        } else {
-          deptIds = uu.departments.map((x: any) => Number(x));
-        }
-      }
-    }
-    setForm({ username: u.username, email: u.email, userRole: u.userRole, departmentIds: deptIds.filter(Boolean) });
-    setEditOpen(true);
-  };
-
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

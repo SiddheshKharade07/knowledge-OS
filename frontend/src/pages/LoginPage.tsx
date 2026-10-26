@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { BookOpen, Brain, Eye, EyeOff, Lock, Search, ShieldCheck } from 'lucide-react';
+import { BookOpen, Brain, Eye, EyeOff, Lock, ShieldCheck } from 'lucide-react';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/auth';

@@ -43,7 +43,7 @@ http.interceptors.response.use(
         const payload = error.response.data as ApiErrorPayload | undefined;
         const message =
           payload?.message ??
-          (Array.isArray(payload?.errors) && payload.errors[0]?.message) ??
+          (Array.isArray(payload?.errors) ? payload.errors[0]?.message : undefined) ??
           error.message ??
           'Request failed';
         if (error.response.status === 401) {
