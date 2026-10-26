@@ -4,6 +4,7 @@ import com.example.KnowledgeOS.dto.ChatMessageResponse;
 import com.example.KnowledgeOS.dto.ChatSessionDto;
 import com.example.KnowledgeOS.dto.request.RenameChatSessionRequest;
 import com.example.KnowledgeOS.dto.request.SendChatMessageRequest;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -19,4 +20,6 @@ public interface ChatService {
     void deleteSession(Long sessionId);
 
     ChatMessageResponse sendMessage(SendChatMessageRequest request);
+
+    SseEmitter streamMessage(SendChatMessageRequest request);
 }

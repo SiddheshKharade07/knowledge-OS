@@ -136,10 +136,8 @@ public class ChatServiceImpl implements ChatService {
         userMessage = chatMessageRepository.save(userMessage);
         session.getMessages().add(userMessage);
 
-        String titleToUpdate = null;
         if (session.getTitle() == null || session.getTitle().isBlank() || "New chat".equals(session.getTitle())) {
-            titleToUpdate = generateTitle(request.message());
-            session.setTitle(titleToUpdate);
+            session.setTitle(generateTitle(request.message()));
         }
 
         RagResponse ragResponse;
@@ -171,6 +169,135 @@ public class ChatServiceImpl implements ChatService {
         ChatMessageDto userDto = toMessageDto(userMessage);
         ChatMessageDto assistantDto = toMessageDto(assistantMessage);
         return new ChatMessageResponse(session.getId(), userDto, assistantDto, session.getTitle());
+    }
+
+    @Override
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamMessage(SendChatMessageRequest request) {
+        if (request == null || request.message() == null || request.message().trim().isEmpty()) {
+            throw new IllegalArgumentException("message is required");
+        }
+        final Long authenticatedUserId = authUtil.getCurrentUserId();
+        if (authenticatedUserId == null) {
+            throw new org.springframework.security.authentication.AuthenticationCredentialsNotFoundException("no JWT found");
+        }
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(300000L);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        final String messageText = request.message();
+        final Long requestedSessionId = request.sessionId();
+        final Long userId = authenticatedUserId;
+        executor.execute(() -> {
+            try {
+                User user = userRepository.findById(userId)
+                        .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+                final ChatSession session;
+                if (requestedSessionId != null) {
+                    session = chatSessionRepository.findByIdAndUserId(requestedSessionId, userId)
+                            .orElseThrow(() -> new ResourceNotFoundException("Chat session not found"));
+                } else {
+                    ChatSession newSession = ChatSession.builder()
+                            .user(user)
+                            .title(generateTitle(messageText))
+                            .messages(new ArrayList<>())
+                            .build();
+                    session = chatSessionRepository.save(newSession);
+                }
+
+                ChatMessage userMessage = ChatMessage.builder()
+                        .session(session)
+                        .role("USER")
+                        .content(messageText)
+                        .build();
+                userMessage = chatMessageRepository.save(userMessage);
+                session.getMessages().add(userMessage);
+
+                if (session.getTitle() == null || session.getTitle().isBlank() || "New chat".equals(session.getTitle())) {
+                    session.setTitle(generateTitle(messageText));
+                }
+                chatSessionRepository.save(session);
+
+                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                        .name("meta")
+                        .data(Map.of("sessionId", session.getId(), "userMessageId", userMessage.getId(), "title", session.getTitle())));
+
+                StringBuilder answerBuilder = new StringBuilder();
+                java.util.List<com.example.KnowledgeOS.dto.Citation> citationsList = new java.util.ArrayList<>();
+
+                ragPipelineService.queryStream(messageText)
+                        .doOnNext(event -> {
+                            try {
+                                if ("content".equals(event.type()) && event.content() != null) {
+                                    answerBuilder.append(event.content());
+                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                            .name("content")
+                                            .data(event.content()));
+                                } else if ("citations".equals(event.type()) && event.data() instanceof java.util.List<?> list) {
+                                    for (Object o : list) {
+                                        if (o instanceof com.example.KnowledgeOS.dto.Citation c) {
+                                            citationsList.add(c);
+                                        }
+                                    }
+                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                            .name("citations")
+                                            .data(citationsList));
+                                } else if ("done".equals(event.type())) {
+                                    String fullAnswer = answerBuilder.toString();
+                                    if (fullAnswer.isBlank()) {
+                                        fullAnswer = "I'm sorry, but the retrieved document context does not contain sufficient information to answer your question.";
+                                    }
+                                    String citationsJson = toJson(citationsList);
+                                    String metadataJson = toJson(Map.of("query", messageText));
+                                    ChatMessage assistantMessage = ChatMessage.builder()
+                                            .session(session)
+                                            .role("ASSISTANT")
+                                            .content(fullAnswer)
+                                            .citationsJson(citationsJson)
+                                            .metadataJson(metadataJson)
+                                            .build();
+                                    assistantMessage = chatMessageRepository.save(assistantMessage);
+                                    session.getMessages().add(assistantMessage);
+                                    chatSessionRepository.save(session);
+                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                            .name("done")
+                                            .data(Map.of("messageId", assistantMessage.getId(), "sessionId", session.getId(), "title", session.getTitle())));
+                                    emitter.complete();
+                                }
+                            } catch (Exception ex) {
+                                log.error("Error streaming chat", ex);
+                                try {
+                                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                            .name("error")
+                                            .data(ex.getMessage() != null ? ex.getMessage() : "Stream error"));
+                                } catch (Exception ignored) {
+                                }
+                                emitter.completeWithError(ex);
+                            }
+                        })
+                        .doOnError(ex -> {
+                            log.error("Stream error", ex);
+                            try {
+                                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                        .name("error")
+                                        .data(ex.getMessage() != null ? ex.getMessage() : "Stream error"));
+                            } catch (Exception ignored) {
+                            }
+                            emitter.completeWithError(ex);
+                        })
+                        .blockLast();
+            } catch (Exception ex) {
+                log.error("Failed to start chat stream", ex);
+                try {
+                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                            .name("error")
+                            .data(ex.getMessage() != null ? ex.getMessage() : "Stream error"));
+                } catch (Exception ignored) {
+                }
+                emitter.completeWithError(ex);
+            } finally {
+                executor.shutdown();
+            }
+        });
+        return emitter;
     }
 
     private String generateTitle(String message) {

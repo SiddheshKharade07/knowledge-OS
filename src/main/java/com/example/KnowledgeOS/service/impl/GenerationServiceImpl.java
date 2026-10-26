@@ -1,6 +1,5 @@
 package com.example.KnowledgeOS.service.impl;
 
-import com.example.KnowledgeOS.dto.Citation;
 import com.example.KnowledgeOS.dto.RagResponse;
 import com.example.KnowledgeOS.dto.RankedChunk;
 import com.example.KnowledgeOS.service.ContextBuilder;
@@ -10,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -84,6 +84,38 @@ public class GenerationServiceImpl implements GenerationService {
                     topChunks,
                     retrievalResult != null ? retrievalResult.getDebugInfo() : null
             );
+        }
+    }
+
+    @Override
+    public Flux<String> generateAnswerStream(
+            String userQuery,
+            List<RankedChunk> topChunks,
+            HybridRetrievalService.RetrievalResult retrievalResult
+    ) {
+        if (topChunks == null || topChunks.isEmpty()) {
+            return Flux.just("I'm sorry, but no relevant document context was found to answer your question.");
+        }
+
+        ContextBuilder.BuiltContext builtContext = contextBuilder.buildContext(topChunks);
+
+        String userPrompt = String.format("""
+            Retrieved Document Context:
+            %s
+
+            User Question: %s
+            """, builtContext.getFormattedContext(), userQuery);
+
+        try {
+            return chatClient.prompt()
+                    .system(SYSTEM_PROMPT)
+                    .user(userPrompt)
+                    .stream()
+                    .content()
+                    .filter(content -> content != null);
+        } catch (Exception e) {
+            log.error("Failed to stream LLM response for query '{}'", userQuery, e);
+            return Flux.just("An error occurred while generating the answer from retrieved context.");
         }
     }
 }

@@ -62,4 +62,14 @@ public class ChatController {
     public ResponseEntity<ChatMessageResponse> sendMessageAlt(@Valid @RequestBody SendChatMessageRequest request) {
         return ResponseEntity.ok(chatService.sendMessage(request));
     }
+
+    @PostMapping(value = "/messages/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamMessage(@Valid @RequestBody SendChatMessageRequest request) {
+        return chatService.streamMessage(request);
+    }
+
+    @PostMapping(value = "/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamMessageAlt(@Valid @RequestBody SendChatMessageRequest request) {
+        return chatService.streamMessage(request);
+    }
 }

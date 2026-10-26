@@ -81,31 +81,67 @@ export default function ChatPage() {
     onError: (err: any) => toast.error(err?.message || 'Failed to delete chat'),
   });
 
+  const [streaming, setStreaming] = React.useState(false);
+  const [streamContent, setStreamContent] = React.useState('');
+  const [streamCitations, setStreamCitations] = React.useState<any[]>([]);
+  const abortRef = React.useRef<AbortController | null>(null);
+
   const sendMessage = useMutation({
-    mutationFn: (payload: string) => chatApi.sendMessage({ sessionId, message: payload }),
-    onMutate: (payload) => {
+    mutationFn: async (payload: string) => {
       setPendingMessage(payload);
       setMessage('');
       setUserScrolledUp(false);
-      return { payload };
-    },
-    onSuccess: (res) => {
-      setPendingMessage(null);
-      queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-      if (sessionId === null) {
-        navigate(`/chat/${res.sessionId}`, { replace: true });
-        queryClient.setQueryData(['chat', 'session', res.sessionId], {
-          id: res.sessionId,
-          title: res.title,
-          messages: [res.userMessage, res.assistantMessage],
-        });
-      } else {
-        queryClient.invalidateQueries({ queryKey: ['chat', 'session', sessionId] });
+      setStreaming(true);
+      setStreamContent('');
+      setStreamCitations([]);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        await chatApi.streamMessage(
+          { sessionId, message: payload },
+          {
+            onMeta: (data) => {
+              if (sessionId === null && data?.sessionId) {
+                navigate(`/chat/${data.sessionId}`, { replace: true });
+              }
+            },
+            onContent: (chunk) => {
+              setStreamContent((prev) => prev + chunk);
+            },
+            onCitations: (citations) => {
+              setStreamCitations(citations || []);
+            },
+            onDone: (data) => {
+              setStreaming(false);
+              setPendingMessage(null);
+              setStreamContent('');
+              setStreamCitations([]);
+              queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+              if (data?.sessionId) {
+                queryClient.invalidateQueries({ queryKey: ['chat', 'session', data.sessionId] });
+              }
+              abortRef.current = null;
+            },
+            onError: (err) => {
+              setStreaming(false);
+              setPendingMessage(null);
+              setStreamContent('');
+              setStreamCitations([]);
+              toast.error(err || 'Failed to send message');
+              abortRef.current = null;
+            },
+          },
+          controller.signal,
+        );
+      } catch (err: any) {
+        setStreaming(false);
+        setPendingMessage(null);
+        setStreamContent('');
+        setStreamCitations([]);
+        toast.error(err?.message || 'Failed to send message');
+        abortRef.current = null;
+        throw err;
       }
-    },
-    onError: (err: any) => {
-      setPendingMessage(null);
-      toast.error(err?.message || 'Failed to send message');
     },
   });
 
@@ -117,7 +153,7 @@ export default function ChatPage() {
   React.useEffect(() => {
     if (userScrolledUp) return;
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, pendingMessage, userScrolledUp]);
+  }, [messages.length, pendingMessage, streamContent, userScrolledUp]);
 
   React.useEffect(() => {
     const el = scrollContainerRef.current;
@@ -307,14 +343,32 @@ export default function ChatPage() {
                   </div>
                 </div>
               ) : null}
-              {sendMessage.isPending && !pendingMessage ? <TypingIndicator /> : null}
-              {sendMessage.isPending && pendingMessage ? (
+              {(streaming && streamContent.length === 0) && pendingMessage ? (
                 <div className="flex justify-start">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-xs text-on-surface-variant">
                       <span>KnowledgeOS Copilot</span>
                     </div>
                     <TypingIndicator />
+                  </div>
+                </div>
+              ) : null}
+              {streaming && streamContent.length > 0 ? (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+                      <span>KnowledgeOS Copilot</span>
+                    </div>
+                    <div className="rounded-2xl rounded-tl-sm bg-surface-container-lowest px-4 py-3 text-sm text-on-surface shadow-card">
+                      <div className="prose prose-sm max-w-none whitespace-pre-wrap break-words">
+                        {streamContent}
+                      </div>
+                      <div className="mt-2 flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.3s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.15s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant" />
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -336,7 +390,7 @@ export default function ChatPage() {
                 className="max-h-40 w-full resize-none bg-transparent py-1 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none"
               />
             </div>
-            <Button type="submit" size="icon" disabled={!message.trim() || sendMessage.isPending}>
+            <Button type="submit" size="icon" disabled={!message.trim() || streaming}>
               <Send className="h-4 w-4" />
             </Button>
           </form>

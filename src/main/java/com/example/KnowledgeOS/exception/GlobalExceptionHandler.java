@@ -82,8 +82,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(apiError.status()).body(apiError);
     }
 
-    @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<ApiError> handleAuthenticationException(AuthenticationException exception) {
+    @ExceptionHandler({AuthenticationException.class, org.springframework.security.authentication.AuthenticationCredentialsNotFoundException.class})
+    public ResponseEntity<ApiError> handleAuthenticationException(Exception exception) {
         ApiError apiError = new ApiError(HttpStatus.UNAUTHORIZED, "Authentication failed: " + exception.getMessage());
         log.error(apiError.toString(), exception);
         return ResponseEntity.status(apiError.status()).body(apiError);
