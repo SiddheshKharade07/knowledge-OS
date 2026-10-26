@@ -24,7 +24,12 @@ public interface UserMapper {
     @Mapping(target = "active", ignore = true)
     User toEntity(CreateUserRequest createUserRequest);
 
-
+    @Mapping(
+            target = "departmentIds",
+            expression = "java(user.getDepartments().stream()" +
+                    ".map(department -> department.getId())" +
+                    ".collect(java.util.stream.Collectors.toSet()))"
+    )
     UserSummaryResponse toUserSummaryResponse(User user);
 
 }

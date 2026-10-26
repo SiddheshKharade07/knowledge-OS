@@ -1,161 +1,390 @@
-import { useEffect, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
-import { useRagQuery } from '../hooks/useRagQuery';
-import { ChatComposer } from '../components/chat/ChatComposer';
-import type { ChatMessage } from '../components/chat/MessageBubble';
-import { MessageBubble } from '../components/chat/MessageBubble';
-import { EmptyState } from '../components/ui/EmptyState';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bot, FileText, PanelLeftClose, PanelLeftOpen, Plus, Send, Trash2 } from 'lucide-react';
+import * as React from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { chatApi } from '../api/chat';
+import { Button } from '../components/ui/Button';
+import { Spinner } from '../components/ui/Spinner';
+import { cn, formatTime } from '../lib/utils';
+import { toast } from 'sonner';
+import type { ChatMessage } from '../api/types';
 
-const SUGGESTED_QUESTIONS = [
-  'How many days per week can I work remotely?',
-  'What is the monthly equipment budget?',
-  'What happens on my first day?',
-];
-
-let messageCounter = 0;
-function nextMessageId(): string {
-  messageCounter += 1;
-  return `msg-${Date.now()}-${messageCounter}`;
+function TypingIndicator() {
+  return (
+    <div className="flex items-center gap-1 rounded-2xl bg-surface-container-lowest px-3 py-2 shadow-card">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant" />
+    </div>
+  );
 }
 
-export function ChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const rag = useRagQuery();
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const lastQueryRef = useRef<string | null>(null);
+const CHAT_HISTORY_KEY = 'knowledgeos.chat.history';
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
-
-  function ask(query: string) {
-    const trimmed = query.trim();
-    if (!trimmed || rag.isPending) return;
-
-    lastQueryRef.current = trimmed;
-    const userMessage: ChatMessage = { id: nextMessageId(), role: 'user', content: trimmed };
-    const pendingId = nextMessageId();
-    setMessages((current) => [
-      ...current,
-      userMessage,
-      { id: pendingId, role: 'assistant', content: '' },
-    ]);
-    setInput('');
-
-    rag.mutate(
-      { query: trimmed },
-      {
-        onSuccess: (response) => {
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === pendingId
-                ? {
-                    ...message,
-                    content: response.answer,
-                    citations: response.citations,
-                  }
-                : message,
-            ),
-          );
-        },
-        onError: (error) => {
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === pendingId
-                ? {
-                    ...message,
-                    content:
-                      error instanceof Error
-                        ? error.message
-                        : 'Unknown error while generating the answer.',
-                    error: true,
-                  }
-                : message,
-            ),
-          );
-        },
-      },
-    );
-  }
-
-  function retryLast() {
-    if (lastQueryRef.current !== null) {
-      setMessages((current) => {
-        const withoutFailed = [...current];
-        for (let i = withoutFailed.length - 1; i >= 0; i -= 1) {
-          if (withoutFailed[i].role === 'user') break;
-          withoutFailed.splice(i, 1);
-        }
-        return withoutFailed;
-      });
-      ask(lastQueryRef.current);
+export default function ChatPage() {
+  const { sessionId: sessionIdParam } = useParams();
+  const sessionId = sessionIdParam ? Number(sessionIdParam) : null;
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [message, setMessage] = React.useState('');
+  const [pendingMessage, setPendingMessage] = React.useState<string | null>(null);
+  const [sessionsOpen, setSessionsOpen] = React.useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = React.useState(() => {
+    try {
+      return localStorage.getItem(CHAT_HISTORY_KEY) === 'collapsed';
+    } catch {
+      return false;
     }
-  }
+  });
+  const endRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const [userScrolledUp, setUserScrolledUp] = React.useState(false);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_HISTORY_KEY, historyCollapsed ? 'collapsed' : 'expanded');
+    } catch {
+      // ignore
+    }
+  }, [historyCollapsed]);
+
+  const sessionsQuery = useQuery({
+    queryKey: ['chat', 'sessions'],
+    queryFn: chatApi.listSessions,
+  });
+
+  const sessionQuery = useQuery({
+    queryKey: ['chat', 'session', sessionId],
+    queryFn: () => chatApi.getSession(sessionId as number),
+    enabled: sessionId !== null && !Number.isNaN(sessionId),
+  });
+
+  const createSession = useMutation({
+    mutationFn: chatApi.createSession,
+    onSuccess: (session) => {
+      queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+      navigate(`/chat/${session.id}`);
+      setSessionsOpen(false);
+    },
+    onError: (err: any) => toast.error(err?.message || 'Failed to create chat'),
+  });
+
+  const deleteSession = useMutation({
+    mutationFn: (id: number) => chatApi.deleteSession(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+      if (sessionId === id) {
+        navigate('/chat');
+      }
+    },
+    onError: (err: any) => toast.error(err?.message || 'Failed to delete chat'),
+  });
+
+  const sendMessage = useMutation({
+    mutationFn: (payload: string) => chatApi.sendMessage({ sessionId, message: payload }),
+    onMutate: (payload) => {
+      setPendingMessage(payload);
+      setMessage('');
+      setUserScrolledUp(false);
+      return { payload };
+    },
+    onSuccess: (res) => {
+      setPendingMessage(null);
+      queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+      if (sessionId === null) {
+        navigate(`/chat/${res.sessionId}`, { replace: true });
+        queryClient.setQueryData(['chat', 'session', res.sessionId], {
+          id: res.sessionId,
+          title: res.title,
+          messages: [res.userMessage, res.assistantMessage],
+        });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['chat', 'session', sessionId] });
+      }
+    },
+    onError: (err: any) => {
+      setPendingMessage(null);
+      toast.error(err?.message || 'Failed to send message');
+    },
+  });
+
+  const messages: ChatMessage[] = React.useMemo(() => {
+    const base = sessionQuery.data?.messages ?? [];
+    return base;
+  }, [sessionQuery.data]);
+
+  React.useEffect(() => {
+    if (userScrolledUp) return;
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, pendingMessage, userScrolledUp]);
+
+  React.useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setUserScrolledUp(distanceFromBottom > 120);
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  React.useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [message]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!message.trim() || sendMessage.isPending) return;
+    sendMessage.mutate(message.trim());
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
+  };
+
+  const suggestions = [
+    'Summarize key compliance requirements',
+    'What documents cover security policies?',
+    'Find onboarding procedures',
+    'List recent vendor requirements',
+  ];
 
   return (
-    <div className="flex flex-col gap-4" style={{ minHeight: 'calc(100vh - 8rem)' }}>
-      <header>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-white">
-          <Sparkles aria-hidden="true" className="h-6 w-6 text-indigo-300" />
-          RAG Chat
-        </h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Grounded answers over your indexed documents, with citations back to source chunks.
-        </p>
-      </header>
-
-      <div
-        className="panel flex min-h-0 flex-1 flex-col overflow-hidden"
-        aria-label="Conversation"
+    <div className="flex h-[calc(100dvh-3.5rem-4rem)] lg:h-[calc(100dvh-3.5rem)]">
+      <aside
+        className={cn(
+          'hidden flex-col border-r border-outline-variant/40 bg-surface-container-lowest lg:flex',
+          historyCollapsed ? 'w-0 overflow-hidden' : 'w-72',
+        )}
       >
-        <div aria-live="polite" aria-atomic="false" className="flex-1 space-y-5 overflow-y-auto p-5">
-          {messages.length === 0 ? (
-            <EmptyState
-              icon={Sparkles}
-              title="Ask your knowledge base anything"
-              description="Answers are generated only from your ingested documents and always cite their sources."
-            />
-          ) : (
-            messages.map((message, index) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                pending={rag.isPending && index === messages.length - 1 && message.role === 'assistant'}
-                onRetry={message.error ? retryLast : undefined}
-              />
-            ))
-          )}
-          <div ref={bottomRef} />
+        <div className="flex h-12 items-center justify-between px-3">
+          <p className="text-sm font-medium text-on-surface">Chats</p>
+          <div className="flex items-center gap-1">
+            <Button size="icon-sm" variant="ghost" onClick={() => createSession.mutate()} disabled={createSession.isPending}>
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button size="icon-sm" variant="ghost" onClick={() => setHistoryCollapsed(true)} title="Collapse chat history">
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-
-        {messages.length === 0 && !rag.isPending && (
-          <div className="border-t border-white/10 px-5 py-3">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-              Try asking
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {SUGGESTED_QUESTIONS.map((question) => (
-                <button
-                  key={question}
-                  type="button"
-                  onClick={() => ask(question)}
-                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 transition hover:border-indigo-400/40 hover:bg-indigo-400/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
-                >
-                  {question}
-                </button>
+        <div className="flex-1 overflow-y-auto px-2 pb-2">
+          {sessionsQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner />
+            </div>
+          ) : sessionsQuery.data?.length ? (
+            <div className="space-y-0.5">
+              {sessionsQuery.data.map((s) => (
+                <div key={s.id} className="group relative">
+                  <button
+                    onClick={() => navigate(`/chat/${s.id}`)}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
+                      sessionId === s.id
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
+                    )}
+                  >
+                    <Bot className="h-4 w-4 shrink-0" />
+                    <span className="flex-1 truncate">{s.title || 'New chat'}</span>
+                  </button>
+                  <button
+                    onClick={() => deleteSession.mutate(s.id)}
+                    className="absolute right-1 top-1/2 hidden -translate-y-1/2 rounded-md p-1 text-on-surface-variant hover:bg-surface-container hover:text-error group-hover:block"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="px-2 py-6 text-center text-sm text-on-surface-variant">No chats yet</p>
+          )}
+        </div>
+      </aside>
 
-        <div className="border-t border-white/10 p-3">
-          <ChatComposer value={input} isPending={rag.isPending} onChange={setInput} onSubmit={() => ask(input)} />
-          <p className="mt-2 px-1 text-[11px] text-slate-600">
-            Enter to send · Shift+Enter for a new line · answers include clickable citations
+      <div className="flex flex-1 flex-col">
+        <div className="flex items-center justify-between border-b border-outline-variant/40 px-3 py-1.5">
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" onClick={() => setSessionsOpen(true)} className="lg:hidden">
+              <Bot className="h-4 w-4" />
+              Sessions
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setHistoryCollapsed((v) => !v)}
+              className="hidden lg:flex"
+              title={historyCollapsed ? 'Expand chat history' : 'Collapse chat history'}
+            >
+              {historyCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </Button>
+          </div>
+          <Button size="sm" variant="primary" onClick={() => createSession.mutate()} disabled={createSession.isPending}>
+            <Plus className="h-4 w-4" />
+            New chat
+          </Button>
+        </div>
+
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-6 lg:px-6">
+          {messages.length === 0 && !pendingMessage ? (
+            <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+                <Bot className="h-6 w-6 text-primary" />
+              </div>
+              <h2 className="text-lg font-semibold text-on-surface">Ask your knowledge base</h2>
+              <p className="mt-1 max-w-md text-sm text-on-surface-variant">
+                Get grounded answers from your organization's documents with citations.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      setMessage(s);
+                      textareaRef.current?.focus();
+                    }}
+                    className="rounded-full border border-outline-variant/70 bg-surface-container-lowest px-3 py-1.5 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mx-auto flex max-w-3xl flex-col gap-6">
+              {messages.map((msg) => (
+                <div key={msg.id} className={cn('flex', msg.role === 'USER' ? 'justify-end' : 'justify-start')}>
+                  <div className={cn('max-w-[85%] space-y-2', msg.role === 'USER' ? 'items-end' : 'items-start')}>
+                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+                      <span>{msg.role === 'USER' ? 'You' : 'KnowledgeOS Copilot'}</span>
+                      {msg.createdAt ? <span>{formatTime(msg.createdAt)}</span> : null}
+                    </div>
+                    <div
+                      className={cn(
+                        'rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-card',
+                        msg.role === 'USER'
+                          ? 'rounded-tr-sm bg-primary text-on-primary'
+                          : 'rounded-tl-sm border border-outline-variant/40 bg-surface-container-lowest text-on-surface',
+                      )}
+                    >
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    </div>
+                    {msg.role === 'ASSISTANT' && Array.isArray(msg.citations) && msg.citations.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {msg.citations.slice(0, 6).map((c, idx) => (
+                          <span
+                            key={`${c.chunkId}-${idx}`}
+                            className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2 py-0.5 text-xs text-on-surface-variant"
+                          >
+                            <FileText className="h-3 w-3" />
+                            [{idx + 1}] {c.documentName}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+              {pendingMessage ? (
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] space-y-2">
+                    <div className="flex items-center justify-end gap-2 text-xs text-on-surface-variant">
+                      <span>You</span>
+                    </div>
+                    <div className="rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm text-on-primary shadow-card">
+                      <p className="whitespace-pre-wrap">{pendingMessage}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {sendMessage.isPending && !pendingMessage ? <TypingIndicator /> : null}
+              {sendMessage.isPending && pendingMessage ? (
+                <div className="flex justify-start">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+                      <span>KnowledgeOS Copilot</span>
+                    </div>
+                    <TypingIndicator />
+                  </div>
+                </div>
+              ) : null}
+              <div ref={endRef} />
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-outline-variant/40 bg-surface-container-lowest/95 p-3 backdrop-blur">
+          <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl items-end gap-2">
+            <div className="flex flex-1 items-end gap-2 rounded-2xl border border-outline-variant/70 bg-surface-container-lowest px-3 py-1.5 shadow-card">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask a question about your documents..."
+                className="max-h-40 w-full resize-none bg-transparent py-1 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none"
+              />
+            </div>
+            <Button type="submit" size="icon" disabled={!message.trim() || sendMessage.isPending}>
+              <Send className="h-4 w-4" />
+            </Button>
+          </form>
+          <p className="mt-1 text-center text-[11px] text-on-surface-variant/70">
+            Answers are grounded in your organization's processed documents.
           </p>
         </div>
       </div>
+
+      {sessionsOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-[#0f172a]/40" onClick={() => setSessionsOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-80 flex-col bg-surface-container-lowest shadow-modal">
+            <div className="flex h-14 items-center justify-between px-3">
+              <p className="text-sm font-medium text-on-surface">Chats</p>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  createSession.mutate();
+                }}
+                disabled={createSession.isPending}
+              >
+                <Plus className="h-4 w-4" />
+                New chat
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 pb-2">
+              {sessionsQuery.data?.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    navigate(`/chat/${s.id}`);
+                    setSessionsOpen(false);
+                  }}
+                  className={cn(
+                    'mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
+                    sessionId === s.id ? 'bg-primary/10 text-primary' : 'text-on-surface-variant',
+                  )}
+                >
+                  <Bot className="h-4 w-4" />
+                  <span className="truncate">{s.title || 'New chat'}</span>
+                </button>
+              ))}
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -8,6 +8,10 @@ public record DocumentResponse(
        String contentType,
        String minioObjectKey,
        Long fileSize,
-       DocumentStatus documentStatus
+       DocumentStatus documentStatus,
+       Long ownerId,
+       String ownerName,
+       String ownerEmail,
+       java.time.Instant createdAt
 ) {
 }

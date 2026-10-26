@@ -25,7 +25,7 @@ public class DepartmentServiceImpl implements DepartmentService {
 
     @Override
     @Transactional
-    @PreAuthorize("@security.canManageDepartment()")
+    @PreAuthorize("@security.canManageDepartments() or @security.canManageUsers()")
     public DepartmentDto createDepartment(DepartmentDto departmentDto) throws BadRequestException {
 
         Department department = departmentRepository.findByName(departmentDto.name()).orElse(null);
@@ -52,7 +52,7 @@ public class DepartmentServiceImpl implements DepartmentService {
 
     @Override
     @Transactional
-    @PreAuthorize("@security.canManageDepartment()")
+    @PreAuthorize("@security.canManageDepartments() or @security.canManageUsers()")
     public void deleteDepartment(Long departmentId) {
         Department department = departmentRepository.findById(departmentId).orElseThrow(() -> new ResourceNotFoundException("department with ID: " + departmentId + " not found"));
         departmentRepository.delete(department);
@@ -66,7 +66,7 @@ public class DepartmentServiceImpl implements DepartmentService {
 
     @Override
     @Transactional
-    @PreAuthorize("@security.canManageDepartment()")
+    @PreAuthorize("@security.canManageDepartments() or @security.canManageUsers()")
     public DepartmentDto updateDepartment(Long departmentId, DepartmentDto departmentDto) throws BadRequestException {
 
         Department department = departmentRepository.findById(departmentId).orElseThrow(() -> new ResourceNotFoundException("department with Id: " + departmentId + " not found"));

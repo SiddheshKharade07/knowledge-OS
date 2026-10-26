@@ -15,6 +15,8 @@ public interface UserManagementService {
 
     UserProfileResponse getUser(Long userId);
 
+    UserProfileResponse updateUser(Long userId, CreateUserRequest updateUserRequest);
+
     UserProfileResponse changeRole(Long userId, ChangeUserRoleRequest request);
 
     UserProfileResponse changeStatus(Long userId, ChangeUserStatusRequest request);

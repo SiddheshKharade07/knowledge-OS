@@ -24,10 +24,6 @@ public class SecurityExpressions {
                 .orElse(false);
     }
 
-    public boolean canManageDepartment() {
-        return hasPermission(SystemPermission.MANAGE_DEPARTMENTS);
-    }
-
     public boolean canManageDepartments() {
         return hasPermission(SystemPermission.MANAGE_DEPARTMENTS);
     }

@@ -16,14 +16,6 @@ public class AIServiceImpl implements AIService {
     private final EmbeddingModel embeddingModel;
 
     @Override
-    public String askAi(String prompt) {
-        return chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
-    }
-
-    @Override
     public float[] getVectorEmbedding(String text) {
         return embeddingModel.embed(text);
     }

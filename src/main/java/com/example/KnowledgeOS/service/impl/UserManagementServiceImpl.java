@@ -176,6 +176,58 @@ public class UserManagementServiceImpl implements UserManagementService {
     @Override
     @Transactional
     @PreAuthorize("@security.canManageMembers()")
+    public UserProfileResponse updateUser(Long userId, CreateUserRequest updateUserRequest) {
+        Long currentUserId = authUtil.getCurrentUserId();
+        if (currentUserId != null && currentUserId.equals(userId) && updateUserRequest.getUserRole() != null) {
+            throw new ForbiddenOperationException("You cannot change your own role");
+        }
+
+        User user = getUserOrThrow(userId);
+        if (user.getUserRole() == UserRole.ADMIN && currentUserId != null && !currentUserId.equals(userId)) {
+            throw new ForbiddenOperationException("You cannot update another administrator");
+        }
+
+        String email = updateUserRequest.getEmail() == null ? user.getEmail() : normalizeEmail(updateUserRequest.getEmail());
+        if (!email.equalsIgnoreCase(user.getEmail()) && userRepository.existsByEmailIgnoreCase(email)) {
+            throw new DuplicateResourceException("An account with this email ID already exists");
+        }
+
+        if (updateUserRequest.getUsername() != null && !updateUserRequest.getUsername().isBlank()) {
+            user.setUsername(updateUserRequest.getUsername());
+        }
+        user.setEmail(email);
+
+        if (updateUserRequest.getUserRole() != null) {
+            if (updateUserRequest.getUserRole() == UserRole.ADMIN && (currentUserId == null || !currentUserId.equals(userId))) {
+                throw new ForbiddenOperationException("You cannot promote users to ADMIN through this API");
+            }
+            if (user.getUserRole() != UserRole.ADMIN) {
+                user.setUserRole(updateUserRequest.getUserRole());
+            }
+        }
+
+        if (updateUserRequest.getDepartmentIds() != null) {
+            java.util.Set<com.example.KnowledgeOS.entity.Department> departments = new java.util.HashSet<>();
+            for (Long deptId : updateUserRequest.getDepartmentIds()) {
+                if (deptId == null) continue;
+                com.example.KnowledgeOS.entity.Department dept = departmentRepository.findById(deptId).orElse(null);
+                if (dept != null) {
+                    departments.add(dept);
+                }
+            }
+            user.setDepartments(departments);
+        }
+
+        User saved = userRepository.save(user);
+        return userMapper.toUserProfileResponse(saved);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.example.KnowledgeOS.repository.DepartmentRepository departmentRepository;
+
+    @Override
+    @Transactional
+    @PreAuthorize("@security.canManageMembers()")
     public void deleteUser(Long userId) {
         Long currentUserId = authUtil.getCurrentUserId();
         if (currentUserId != null && currentUserId.equals(userId)) {
@@ -228,12 +280,19 @@ public class UserManagementServiceImpl implements UserManagementService {
     }
 
     private UserSummaryResponse toSummary(User user) {
+        java.util.Set<Long> deptIds = user.getDepartments() == null
+                ? java.util.Set.of()
+                : user.getDepartments().stream()
+                .filter(java.util.Objects::nonNull)
+                .map(d -> d.getId())
+                .collect(java.util.stream.Collectors.toSet());
         return new UserSummaryResponse(
                 user.getId(),
                 user.getUsername(),
                 user.getEmail(),
                 user.getUserRole(),
-                user.isActive()
+                user.isActive(),
+                deptIds
         );
     }
 

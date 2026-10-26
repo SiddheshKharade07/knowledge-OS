@@ -38,6 +38,16 @@ public class UserManagementController {
         return ResponseEntity.ok(userManagementService.getUser(id));
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<UserProfileResponse> updateUser(@PathVariable Long id, @RequestBody @Valid CreateUserRequest updateUserRequest) {
+        return ResponseEntity.ok(userManagementService.updateUser(id, updateUserRequest));
+    }
+
+    @PatchMapping("/{id}")
+    public ResponseEntity<UserProfileResponse> updateUserPatch(@PathVariable Long id, @RequestBody @Valid CreateUserRequest updateUserRequest) {
+        return ResponseEntity.ok(userManagementService.updateUser(id, updateUserRequest));
+    }
+
     @PatchMapping("/{id}/role")
     public ResponseEntity<UserProfileResponse> changeRole(@PathVariable Long id, @RequestBody @Valid ChangeUserRoleRequest request) {
         return ResponseEntity.ok(userManagementService.changeRole(id, request));
