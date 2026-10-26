@@ -187,6 +187,10 @@ public class ChatServiceImpl implements ChatService {
         final Long userId = authenticatedUserId;
         executor.execute(() -> {
             try {
+                org.springframework.security.core.context.SecurityContext ctx = org.springframework.security.core.context.SecurityContextHolder.createEmptyContext();
+                org.springframework.security.authentication.UsernamePasswordAuthenticationToken auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(userId.toString(), null, java.util.List.of());
+                ctx.setAuthentication(auth);
+                org.springframework.security.core.context.SecurityContextHolder.setContext(ctx);
                 User user = userRepository.findById(userId)
                         .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
