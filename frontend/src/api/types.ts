@@ -38,6 +38,7 @@ export interface AuthResponse {
 export interface SendChatMessageRequest {
   sessionId?: number | null;
   message: string;
+  userMessageId?: number | null;
 }
 
 export interface LoginRequest {

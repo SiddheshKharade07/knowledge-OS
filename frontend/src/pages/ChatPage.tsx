@@ -1,527 +1,645 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, FileText, PanelLeftClose, PanelLeftOpen, Plus, Send, Trash2 } from 'lucide-react';
 import * as React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Bot, FileText, Send, Square } from 'lucide-react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { chatApi } from '../api/chat';
+import { ApiRequestError } from '../api/client';
+import type { ChatMessage, Citation } from '../api/types';
 import { Button } from '../components/ui/Button';
-import { Spinner } from '../components/ui/Spinner';
+import { ChatErrorCard } from '../components/chat/ChatErrorCard';
+import { useChatActivity } from '../components/chat/chatActivity';
+import {
+  ChatStreamError,
+  failureForCode,
+  failureForStatus,
+  isAbortError,
+  toChatFailure,
+  type ChatFailure,
+} from '../lib/errors';
 import { cn, formatTime } from '../lib/utils';
-import { toast } from 'sonner';
-import type { ChatMessage } from '../api/types';
+import { useAuthStore } from '../stores/auth';
 
-function TypingIndicator() {
+type TurnStatus = 'pending' | 'streaming' | 'done' | 'failed' | 'stopped';
+
+interface Turn {
+  prompt: string;
+  sessionId: number | null;
+  userMessageId: number | null;
+  assistantMessageId: number | null;
+  content: string;
+  citations: Citation[];
+  status: TurnStatus;
+  failure: ChatFailure | null;
+}
+
+const SUGGESTIONS = [
+  'Summarize key compliance requirements',
+  'What documents cover security policies?',
+  'Find onboarding procedures',
+  'List recent vendor requirements',
+];
+
+/** Matches the server-side `@Size(max = 2000)` validation on chat messages. */
+const MAX_MESSAGE_LENGTH = 2000;
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function TypingDots({ className }: { className?: string }) {
   return (
-    <div className="flex items-center gap-1 rounded-2xl bg-surface-container-lowest px-3 py-2 shadow-card">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.3s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.15s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant" />
+    <span className={cn('inline-flex items-center gap-1', className)} aria-hidden>
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant/70 [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant/70 [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant/70" />
+    </span>
+  );
+}
+
+function CitationChips({ citations }: { citations: Citation[] }) {
+  if (!citations.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {citations.slice(0, 6).map((citation, index) => (
+        <span
+          key={`${citation.chunkId}-${index}`}
+          className="inline-flex max-w-full items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2 py-0.5 text-xs text-on-surface-variant"
+          title={citation.documentName}
+        >
+          <FileText className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            [{index + 1}] {citation.documentName}
+          </span>
+        </span>
+      ))}
     </div>
   );
 }
 
-const CHAT_HISTORY_KEY = 'knowledgeos.chat.history';
+function Bubble({
+  role,
+  content,
+  createdAt,
+  citations,
+  streaming,
+  incomplete,
+}: {
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  createdAt?: string | null;
+  citations?: Citation[] | null;
+  streaming?: boolean;
+  incomplete?: boolean;
+}) {
+  const isUser = role === 'USER';
+  return (
+    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+      <div className={cn('max-w-[85%] space-y-2 sm:max-w-[78%]', isUser && 'flex flex-col items-end')}>
+        <div className={cn('flex items-center gap-2 text-xs text-on-surface-variant', isUser && 'justify-end')}>
+          <span>{isUser ? 'You' : 'KnowledgeOS Copilot'}</span>
+          {createdAt ? <span>{formatTime(createdAt)}</span> : null}
+        </div>
+        <div
+          className={cn(
+            'rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-card',
+            isUser
+              ? 'rounded-tr-sm bg-primary text-on-primary'
+              : 'rounded-tl-sm border border-outline-variant/40 bg-surface-container-lowest text-on-surface',
+          )}
+        >
+          <p className="whitespace-pre-wrap break-words">{content}</p>
+          {streaming ? <TypingDots className="mt-2" /> : null}
+        </div>
+        {incomplete ? (
+          <p className="text-xs font-medium text-warning" role="note">
+            Incomplete response
+          </p>
+        ) : null}
+        {!isUser && citations?.length ? <CitationChips citations={citations} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function ChatSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-7" aria-hidden>
+      {[0, 1, 2].map((index) => (
+        <div key={index} className={cn('space-y-2', index % 2 === 1 && 'flex flex-col items-end')}>
+          <div className="h-3 w-28 animate-pulse rounded bg-surface-container" />
+          <div
+            className={cn(
+              'h-20 animate-pulse rounded-2xl bg-surface-container',
+              index % 2 === 1 ? 'w-2/3' : 'w-3/4',
+            )}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function sessionLoadFailure(error: unknown): ChatFailure {
+  if (error instanceof ApiRequestError) {
+    if (error.isNetworkError) {
+      return failureForCode('network', { phase: 'pre-stream' });
+    }
+    return failureForStatus(error.httpStatus ?? 0);
+  }
+  return toChatFailure(error);
+}
 
 export default function ChatPage() {
   const { sessionId: sessionIdParam } = useParams();
-  const sessionId = sessionIdParam ? Number(sessionIdParam) : null;
+  const parsedSessionId = sessionIdParam === undefined ? null : Number(sessionIdParam);
+  const invalidSessionParam =
+    sessionIdParam !== undefined && (parsedSessionId === null || !Number.isFinite(parsedSessionId));
+  const sessionId = invalidSessionParam ? null : parsedSessionId;
+
+  const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { register, allowNextNavigation } = useChatActivity();
+  const logout = useAuthStore((state) => state.logout);
+
   const [message, setMessage] = React.useState('');
-  const [pendingMessage, setPendingMessage] = React.useState<string | null>(null);
-  const [sessionsOpen, setSessionsOpen] = React.useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = React.useState(() => {
-    try {
-      return localStorage.getItem(CHAT_HISTORY_KEY) === 'collapsed';
-    } catch {
-      return false;
-    }
-  });
-  const endRef = React.useRef<HTMLDivElement>(null);
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const [turn, setTurn] = React.useState<Turn | null>(null);
+  const turnRef = React.useRef<Turn | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
   const [userScrolledUp, setUserScrolledUp] = React.useState(false);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const endRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
-  React.useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_HISTORY_KEY, historyCollapsed ? 'collapsed' : 'expanded');
-    } catch {
-      // ignore
-    }
-  }, [historyCollapsed]);
+  const isStreaming = turn?.status === 'pending' || turn?.status === 'streaming';
 
-  const sessionsQuery = useQuery({
-    queryKey: ['chat', 'sessions'],
-    queryFn: chatApi.listSessions,
-  });
+  const updateTurn = React.useCallback((updater: (previous: Turn | null) => Turn | null) => {
+    const next = updater(turnRef.current);
+    turnRef.current = next;
+    setTurn(next);
+  }, []);
 
   const sessionQuery = useQuery({
     queryKey: ['chat', 'session', sessionId],
     queryFn: () => chatApi.getSession(sessionId as number),
-    enabled: sessionId !== null && !Number.isNaN(sessionId),
-  });
-
-  const createSession = useMutation({
-    mutationFn: chatApi.createSession,
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-      navigate(`/chat/${session.id}`);
-      setSessionsOpen(false);
-    },
-    onError: (err: any) => toast.error(err?.message || 'Failed to create chat'),
-  });
-
-  const deleteSession = useMutation({
-    mutationFn: (id: number) => chatApi.deleteSession(id),
-    onSuccess: (_, id) => {
-      queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-      if (sessionId === id) {
-        navigate('/chat');
+    enabled: sessionId !== null,
+    retry: (failureCount, error) => {
+      if (
+        error instanceof ApiRequestError &&
+        error.httpStatus !== undefined &&
+        [401, 403, 404].includes(error.httpStatus)
+      ) {
+        return false;
       }
-    },
-    onError: (err: any) => toast.error(err?.message || 'Failed to delete chat'),
-  });
-
-  const [streaming, setStreaming] = React.useState(false);
-  const [streamContent, setStreamContent] = React.useState('');
-  const [streamCitations, setStreamCitations] = React.useState<any[]>([]);
-  const [streamError, setStreamError] = React.useState<string | null>(null);
-  const abortRef = React.useRef<AbortController | null>(null);
-  const streamSessionRef = React.useRef<number | null>(null);
-
-  const sendMessage = useMutation({
-    mutationFn: async (payload: string) => {
-      setPendingMessage(payload);
-      setMessage('');
-      setUserScrolledUp(false);
-      setStreaming(true);
-      setStreamContent('');
-      setStreamCitations([]);
-      setStreamError(null);
-      streamSessionRef.current = sessionId;
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        await chatApi.streamMessage(
-          { sessionId, message: payload },
-          {
-            onMeta: (data) => {
-              if (data?.sessionId) {
-                streamSessionRef.current = data.sessionId;
-              }
-            },
-            onContent: (chunk) => {
-              setStreamContent((prev) => prev + chunk);
-            },
-            onCitations: (citations) => {
-              setStreamCitations(citations || []);
-            },
-            onDone: (data) => {
-              setStreaming(false);
-              setPendingMessage(null);
-              setStreamContent('');
-              setStreamCitations([]);
-              setStreamError(null);
-              queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-              if (data?.sessionId) {
-                queryClient.invalidateQueries({ queryKey: ['chat', 'session', data.sessionId] });
-                if (sessionId === null) {
-                  navigate(`/chat/${data.sessionId}`, { replace: true });
-                }
-              }
-              abortRef.current = null;
-            },
-            onError: (err) => {
-              const message = err || 'Failed to send message';
-              setStreaming(false);
-              setStreamError(message);
-              toast.error(message);
-              if (streamSessionRef.current) {
-                queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-                queryClient.invalidateQueries({ queryKey: ['chat', 'session', streamSessionRef.current] });
-                if (sessionId === null) {
-                  navigate(`/chat/${streamSessionRef.current}`, { replace: true });
-                }
-              }
-              setPendingMessage(null);
-              abortRef.current = null;
-            },
-          },
-          controller.signal,
-        );
-      } catch (err: any) {
-        const aborted = err?.name === 'AbortError';
-        setStreaming(false);
-        if (aborted) {
-          setStreamError('Generation stopped.');
-          if (streamSessionRef.current) {
-            queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-            queryClient.invalidateQueries({ queryKey: ['chat', 'session', streamSessionRef.current] });
-            if (sessionId === null) {
-              navigate(`/chat/${streamSessionRef.current}`, { replace: true });
-            }
-          }
-          setPendingMessage(null);
-        } else {
-          const message = err?.message || 'Failed to send message';
-          setStreamError(message);
-          toast.error(message);
-          if (streamSessionRef.current) {
-            queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
-            queryClient.invalidateQueries({ queryKey: ['chat', 'session', streamSessionRef.current] });
-            if (sessionId === null) {
-              navigate(`/chat/${streamSessionRef.current}`, { replace: true });
-            }
-          }
-          setPendingMessage(null);
-        }
-        abortRef.current = null;
-        if (!aborted) throw err;
-      }
+      return failureCount < 1;
     },
   });
 
-  const stopGenerating = () => {
+  const messages: ChatMessage[] = React.useMemo(
+    () => sessionQuery.data?.messages ?? [],
+    [sessionQuery.data],
+  );
+
+  const stopGenerating = React.useCallback(() => {
     abortRef.current?.abort();
-    abortRef.current = null;
-    setStreaming(false);
-  };
+  }, []);
 
-
-  const messages: ChatMessage[] = React.useMemo(() => {
-    const base = sessionQuery.data?.messages ?? [];
-    return base;
-  }, [sessionQuery.data]);
-
+  // A route change guard aborts before unmount, but never leave a request running
+  // if this component is removed for any other reason.
   React.useEffect(() => {
-    if (userScrolledUp) return;
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, pendingMessage, streamContent, userScrolledUp]);
-
-  React.useEffect(() => {
-    const activeStreamSession = streamSessionRef.current;
-    if (activeStreamSession !== null && sessionId !== activeStreamSession) {
+    return () => {
       abortRef.current?.abort();
       abortRef.current = null;
-      streamSessionRef.current = null;
-      setStreaming(false);
-      setStreamContent('');
-      setStreamCitations([]);
-      setStreamError(null);
-      setPendingMessage(null);
-    }
-    if (sessionId === null) {
-      setStreamContent('');
-      setStreamError(null);
-    }
-  }, [sessionId]);
-
-  React.useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setUserScrolledUp(distanceFromBottom > 120);
     };
-    el.addEventListener('scroll', onScroll);
-    return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
   React.useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    register({ streaming: isStreaming, stop: stopGenerating });
+    return () => register(null);
+  }, [isStreaming, register, stopGenerating]);
+
+  // Once the persisted assistant message is available, let the database copy take over.
+  React.useEffect(() => {
+    const current = turn;
+    if (!current || current.status !== 'done') return;
+    if (current.assistantMessageId !== null && messages.some((item) => item.id === current.assistantMessageId)) {
+      updateTurn(() => null);
+    }
+  }, [messages, turn, updateTurn]);
+
+  // Leaving the conversation resets any local (unsaved) turn state.
+  React.useEffect(() => {
+    const current = turnRef.current;
+    if (!current) return;
+    if (current.sessionId !== null && current.sessionId !== sessionId) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      updateTurn(() => null);
+    }
+  }, [sessionId, updateTurn]);
+
+  // "New chat" while already on the draft page must clear the previous draft turn.
+  React.useEffect(() => {
+    const state = location.state as { newChatAt?: number } | null;
+    if (!state?.newChatAt) return;
+    const current = turnRef.current;
+    if (current && (current.status === 'pending' || current.status === 'streaming')) {
+      // Explicit "New chat" (guard confirmed) still aborts and resets.
+      abortRef.current?.abort();
+      abortRef.current = null;
+    }
+    updateTurn(() => null);
+    setMessage('');
+  }, [location.key, location.state, updateTurn]);
+
+  React.useEffect(() => {
+    const element = scrollContainerRef.current;
+    if (!element) return;
+    const onScroll = () => {
+      const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+      setUserScrolledUp(distanceFromBottom > 120);
+    };
+    element.addEventListener('scroll', onScroll);
+    return () => element.removeEventListener('scroll', onScroll);
+  }, []);
+
+  React.useEffect(() => {
+    if (userScrolledUp) return;
+    endRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      block: 'end',
+    });
+  }, [messages.length, turn?.content.length, turn?.status, userScrolledUp]);
+
+  React.useEffect(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
   }, [message]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!message.trim() || sendMessage.isPending) return;
-    sendMessage.mutate(message.trim());
-  };
+  React.useEffect(() => {
+    if (sessionId === null) {
+      textareaRef.current?.focus();
+    }
+  }, [sessionId]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e as any);
+  const invalidateSession = (id: number | null) => {
+    void queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+    if (id !== null) {
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'session', id] });
     }
   };
 
-  const suggestions = [
-    'Summarize key compliance requirements',
-    'What documents cover security policies?',
-    'Find onboarding procedures',
-    'List recent vendor requirements',
-  ];
+  const startTurn = async (
+    prompt: string,
+    options: { sessionId: number | null; userMessageId: number | null },
+    force = false,
+  ) => {
+    const active = turnRef.current;
+    if (!force && active && (active.status === 'pending' || active.status === 'streaming')) return;
 
-  return (
-    <div className="flex h-[calc(100dvh-3.5rem-4rem)] lg:h-[calc(100dvh-3.5rem)]">
-      <aside
-        className={cn(
-          'hidden flex-col border-r border-outline-variant/40 bg-surface-container-lowest lg:flex',
-          historyCollapsed ? 'w-0 overflow-hidden' : 'w-72',
-        )}
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setUserScrolledUp(false);
+    updateTurn(() => ({
+      prompt,
+      sessionId: options.sessionId,
+      userMessageId: options.userMessageId,
+      assistantMessageId: null,
+      content: '',
+      citations: [],
+      status: 'pending',
+      failure: null,
+    }));
+
+    const routeWasDraft = sessionId === null;
+
+    try {
+      const done = await chatApi.streamMessage(
+        {
+          sessionId: options.sessionId,
+          message: prompt,
+          userMessageId: options.userMessageId,
+        },
+        {
+          onMeta: (meta) => {
+            updateTurn((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    sessionId: meta.sessionId,
+                    userMessageId: meta.userMessageId > 0 ? meta.userMessageId : null,
+                    status: 'streaming',
+                  }
+                : previous,
+            );
+            if (routeWasDraft) {
+              // Surface the new conversation in the sidebar immediately, not only
+              // after the answer finishes.
+              void queryClient.invalidateQueries({ queryKey: ['chat', 'sessions'] });
+              allowNextNavigation(() => navigate(`/chat/${meta.sessionId}`, { replace: true }));
+            }
+          },
+          onContent: (chunk) => {
+            updateTurn((previous) =>
+              previous
+                ? { ...previous, content: previous.content + chunk, status: 'streaming' }
+                : previous,
+            );
+          },
+          onCitations: (citations) => {
+            updateTurn((previous) => (previous ? { ...previous, citations } : previous));
+          },
+        },
+        controller.signal,
+      );
+
+      updateTurn((previous) =>
+        previous
+          ? {
+              ...previous,
+              sessionId: done.sessionId,
+              assistantMessageId: done.messageId > 0 ? done.messageId : null,
+              status: 'done',
+            }
+          : previous,
+      );
+      invalidateSession(done.sessionId);
+    } catch (error) {
+      const current = turnRef.current;
+      if (isAbortError(error)) {
+        updateTurn((previous) =>
+          previous
+            ? {
+                ...previous,
+                status: 'stopped',
+                failure: failureForCode('stopped', {
+                  phase: 'in-stream',
+                  sessionId: previous.sessionId,
+                  userMessageId: previous.userMessageId,
+                }),
+              }
+            : previous,
+        );
+        invalidateSession(current?.sessionId ?? null);
+        return;
+      }
+
+      const failure = toChatFailure(error, {
+        sessionId: current?.sessionId ?? options.sessionId,
+        userMessageId: current?.userMessageId ?? options.userMessageId,
+        phase: error instanceof ChatStreamError ? undefined : 'pre-stream',
+      });
+      const failureSessionId = failure.sessionId ?? current?.sessionId ?? options.sessionId;
+      const failureUserMessageId = failure.userMessageId ?? current?.userMessageId ?? null;
+
+      // Commit the failure synchronously so the navigation below cannot mistake it
+      // for a turn belonging to a different conversation.
+      const failedTurn: Turn = {
+        prompt,
+        sessionId: failureSessionId,
+        userMessageId: failureUserMessageId,
+        assistantMessageId: null,
+        content: current?.content ?? '',
+        citations: current?.citations ?? [],
+        status: 'failed',
+        failure,
+      };
+      updateTurn(() => failedTurn);
+
+      if (failureSessionId !== null) {
+        invalidateSession(failureSessionId);
+        if (routeWasDraft) {
+          allowNextNavigation(() => navigate(`/chat/${failureSessionId}`, { replace: true }));
+        }
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  };
+
+  const submit = () => {
+    const text = message.trim();
+    if (!text || isStreaming || text.length > MAX_MESSAGE_LENGTH) return;
+    setMessage('');
+    void startTurn(text, { sessionId, userMessageId: null });
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    submit();
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
+  };
+
+  const retry = () => {
+    const current = turnRef.current;
+    if (!current) return;
+    void startTurn(current.prompt, { sessionId: current.sessionId, userMessageId: current.userMessageId }, true);
+  };
+
+  const dismissError = () => {
+    const current = turnRef.current;
+    if (!current) return;
+    if (current.userMessageId === null) {
+      // The prompt was never persisted (failure before streaming started), so
+      // dismissing also removes the local-only bubble.
+      updateTurn(() => null);
+      return;
+    }
+    // Keep the persisted user message visible but drop the local error state.
+    updateTurn((previous) => (previous ? { ...previous, failure: null } : previous));
+    invalidateSession(current.sessionId);
+  };
+
+  const goToNewChat = () => {
+    navigate('/chat', { state: { newChatAt: Date.now() } });
+  };
+
+  const signIn = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
+
+  const turnUserId = turn?.userMessageId ?? null;
+  const turnAssistantId = turn?.assistantMessageId ?? null;
+  const visibleMessages = messages.filter(
+    (item) => item.id !== turnUserId && item.id !== turnAssistantId,
+  );
+  const showEmptyState =
+    !turn && visibleMessages.length === 0 && !sessionQuery.isLoading && !sessionQuery.isError;
+
+  if (invalidSessionParam || (sessionQuery.isError && !turn)) {
+    const failure = invalidSessionParam
+      ? failureForCode('not_found', { phase: 'pre-stream' })
+      : sessionLoadFailure(sessionQuery.error);
+    return (
+      <div
+        role="alert"
+        className="mx-auto flex h-full max-w-md flex-col items-center justify-center gap-3 px-5 text-center"
       >
-        <div className="flex h-12 items-center justify-between px-3">
-          <p className="text-sm font-medium text-on-surface">Chats</p>
-          <div className="flex items-center gap-1">
-            <Button size="icon-sm" variant="ghost" onClick={() => createSession.mutate()} disabled={createSession.isPending}>
-              <Plus className="h-4 w-4" />
-            </Button>
-            <Button size="icon-sm" variant="ghost" onClick={() => setHistoryCollapsed(true)} title="Collapse chat history">
-              <PanelLeftClose className="h-4 w-4" />
-            </Button>
-          </div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-error-container">
+          <AlertTriangle className="h-5 w-5 text-on-error-container" />
         </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {sessionsQuery.isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Spinner />
-            </div>
-          ) : sessionsQuery.data?.length ? (
-            <div className="space-y-0.5">
-              {sessionsQuery.data.map((s) => (
-                <div key={s.id} className="group relative">
-                  <button
-                    onClick={() => navigate(`/chat/${s.id}`)}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
-                      sessionId === s.id
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
-                    )}
-                  >
-                    <Bot className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 truncate">{s.title || 'New chat'}</span>
-                  </button>
-                  <button
-                    onClick={() => deleteSession.mutate(s.id)}
-                    className="absolute right-1 top-1/2 hidden -translate-y-1/2 rounded-md p-1 text-on-surface-variant hover:bg-surface-container hover:text-error group-hover:block"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="px-2 py-6 text-center text-sm text-on-surface-variant">No chats yet</p>
-          )}
+        <div>
+          <h2 className="text-base font-semibold text-on-surface">Conversation unavailable</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">{failure.message}</p>
         </div>
-      </aside>
-
-      <div className="flex flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-outline-variant/40 px-3 py-1.5">
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setSessionsOpen(true)} className="lg:hidden">
-              <Bot className="h-4 w-4" />
-              Sessions
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              onClick={() => setHistoryCollapsed((v) => !v)}
-              className="hidden lg:flex"
-              title={historyCollapsed ? 'Expand chat history' : 'Collapse chat history'}
-            >
-              {historyCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </Button>
-          </div>
-          <Button size="sm" variant="primary" onClick={() => createSession.mutate()} disabled={createSession.isPending}>
-            <Plus className="h-4 w-4" />
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={goToNewChat}>
             New chat
           </Button>
-        </div>
-
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-6 lg:px-6">
-          {messages.length === 0 && !pendingMessage ? (
-            <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                <Bot className="h-6 w-6 text-primary" />
-              </div>
-              <h2 className="text-lg font-semibold text-on-surface">Ask your knowledge base</h2>
-              <p className="mt-1 max-w-md text-sm text-on-surface-variant">
-                Get grounded answers from your organization's documents with citations.
-              </p>
-              <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-                {suggestions.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      setMessage(s);
-                      textareaRef.current?.focus();
-                    }}
-                    className="rounded-full border border-outline-variant/70 bg-surface-container-lowest px-3 py-1.5 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-6">
-              {messages.map((msg) => (
-                <div key={msg.id} className={cn('flex', msg.role === 'USER' ? 'justify-end' : 'justify-start')}>
-                  <div className={cn('max-w-[85%] space-y-2', msg.role === 'USER' ? 'items-end' : 'items-start')}>
-                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
-                      <span>{msg.role === 'USER' ? 'You' : 'KnowledgeOS Copilot'}</span>
-                      {msg.createdAt ? <span>{formatTime(msg.createdAt)}</span> : null}
-                    </div>
-                    <div
-                      className={cn(
-                        'rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-card',
-                        msg.role === 'USER'
-                          ? 'rounded-tr-sm bg-primary text-on-primary'
-                          : 'rounded-tl-sm border border-outline-variant/40 bg-surface-container-lowest text-on-surface',
-                      )}
-                    >
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                    </div>
-                    {msg.role === 'ASSISTANT' && Array.isArray(msg.citations) && msg.citations.length > 0 ? (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {msg.citations.slice(0, 6).map((c, idx) => (
-                          <span
-                            key={`${c.chunkId}-${idx}`}
-                            className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2 py-0.5 text-xs text-on-surface-variant"
-                          >
-                            <FileText className="h-3 w-3" />
-                            [{idx + 1}] {c.documentName}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-              {pendingMessage ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] space-y-2">
-                    <div className="flex items-center justify-end gap-2 text-xs text-on-surface-variant">
-                      <span>You</span>
-                    </div>
-                    <div className="rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm text-on-primary shadow-card">
-                      <p className="whitespace-pre-wrap">{pendingMessage}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {(streaming && streamContent.length === 0) ? (
-                <div className="flex justify-start">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
-                      <span>KnowledgeOS Copilot</span>
-                    </div>
-                    <TypingIndicator />
-                  </div>
-                </div>
-              ) : null}
-              {streamContent.length > 0 ? (
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
-                      <span>KnowledgeOS Copilot</span>
-                    </div>
-                    <div className="rounded-2xl rounded-tl-sm bg-surface-container-lowest px-4 py-3 text-sm text-on-surface shadow-card">
-                      <div className="prose prose-sm max-w-none whitespace-pre-wrap break-words">
-                        {streamContent}
-                      </div>
-                      {streaming ? (
-                        <div className="mt-2 flex items-center gap-1">
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.3s]" />
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant [animation-delay:-0.15s]" />
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-surface-variant" />
-                        </div>
-                      ) : null}
-                    </div>
-                    {streamCitations.length > 0 ? (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {streamCitations.slice(0, 6).map((c: any, idx: number) => (
-                          <span
-                            key={`${c.chunkId}-${idx}`}
-                            className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2 py-0.5 text-xs text-on-surface-variant"
-                          >
-                            <FileText className="h-3 w-3" />
-                            [{idx + 1}] {c.documentName}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {!streaming && streamError ? (
-                      <p className="text-xs text-error">{streamError}</p>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-              <div ref={endRef} />
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-outline-variant/40 bg-surface-container-lowest/95 p-3 backdrop-blur">
-          <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl items-end gap-2">
-            <div className="flex flex-1 items-end gap-2 rounded-2xl border border-outline-variant/70 bg-surface-container-lowest px-3 py-1.5 shadow-card">
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask a question about your documents..."
-                className="max-h-40 w-full resize-none bg-transparent py-1 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none"
-              />
-            </div>
-            <Button type="submit" size="icon" disabled={!message.trim() || streaming}>
-              <Send className="h-4 w-4" />
+          {!invalidSessionParam ? (
+            <Button size="sm" variant="ghost" onClick={() => void sessionQuery.refetch()}>
+              Try again
             </Button>
-            {streaming ? (
-              <Button type="button" size="sm" variant="outline" onClick={stopGenerating} title="Stop generating">
-                Stop
-              </Button>
-            ) : null}
-          </form>
-          <p className="mt-1 text-center text-[11px] text-on-surface-variant/70">
-            Answers are grounded in your organization's processed documents.
-          </p>
+          ) : null}
         </div>
       </div>
+    );
+  }
 
-      {sessionsOpen ? (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-[#0f172a]/40" onClick={() => setSessionsOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-80 flex-col bg-surface-container-lowest shadow-modal">
-            <div className="flex h-14 items-center justify-between px-3">
-              <p className="text-sm font-medium text-on-surface">Chats</p>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => {
-                  createSession.mutate();
-                }}
-                disabled={createSession.isPending}
-              >
-                <Plus className="h-4 w-4" />
-                New chat
-              </Button>
+  const messageLength = message.trim().length;
+  const messageTooLong = messageLength > MAX_MESSAGE_LENGTH;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <p className="sr-only" role="status" aria-live="polite">
+        {isStreaming ? 'Generating a response' : turn?.status === 'done' ? 'Response complete' : ''}
+      </p>
+
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-6 lg:px-6">
+        {sessionQuery.isLoading && !turn ? (
+          <ChatSkeleton />
+        ) : showEmptyState ? (
+          <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center px-2 text-center">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+              <Bot className="h-6 w-6 text-primary" />
             </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-2">
-              {sessionsQuery.data?.map((s) => (
+            <h2 className="text-lg font-semibold text-on-surface">Ask your knowledge base</h2>
+            <p className="mt-1 max-w-md text-sm text-on-surface-variant">
+              Get grounded answers from your organization&apos;s documents, with citations.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              {SUGGESTIONS.map((suggestion) => (
                 <button
-                  key={s.id}
+                  key={suggestion}
+                  type="button"
                   onClick={() => {
-                    navigate(`/chat/${s.id}`);
-                    setSessionsOpen(false);
+                    setMessage(suggestion);
+                    textareaRef.current?.focus();
                   }}
-                  className={cn(
-                    'mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
-                    sessionId === s.id ? 'bg-primary/10 text-primary' : 'text-on-surface-variant',
-                  )}
+                  className="rounded-full border border-outline-variant/70 bg-surface-container-lowest px-3 py-1.5 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface focus-ring"
                 >
-                  <Bot className="h-4 w-4" />
-                  <span className="truncate">{s.title || 'New chat'}</span>
+                  {suggestion}
                 </button>
               ))}
             </div>
-          </aside>
-        </div>
-      ) : null}
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-3xl flex-col gap-6">
+            {visibleMessages.map((item) => (
+              <Bubble
+                key={item.id}
+                role={item.role === 'USER' ? 'USER' : 'ASSISTANT'}
+                content={item.content}
+                createdAt={item.createdAt}
+                citations={item.citations}
+              />
+            ))}
+
+            {turn ? (
+              <>
+                <Bubble role="USER" content={turn.prompt} />
+                {turn.content.length > 0 ? (
+                  <Bubble
+                    role="ASSISTANT"
+                    content={turn.content}
+                    citations={turn.citations}
+                    streaming={turn.status === 'streaming' || turn.status === 'pending'}
+                    incomplete={turn.status === 'failed' || turn.status === 'stopped'}
+                  />
+                ) : turn.status === 'pending' || turn.status === 'streaming' ? (
+                  <div className="flex justify-start">
+                    <div className="space-y-2">
+                      <div className="text-xs text-on-surface-variant">KnowledgeOS Copilot</div>
+                      <div className="rounded-2xl rounded-tl-sm border border-outline-variant/40 bg-surface-container-lowest px-3 py-2.5 shadow-card">
+                        <TypingDots />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {turn.failure ? (
+                  <ChatErrorCard
+                    failure={turn.failure}
+                    partial={turn.status === 'failed' && turn.content.length > 0}
+                    onRetry={turn.failure.retryable ? retry : undefined}
+                    onDismiss={turn.failure.code === 'auth' ? undefined : dismissError}
+                    onSignIn={signIn}
+                  />
+                ) : null}
+              </>
+            ) : null}
+
+            <div ref={endRef} />
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-outline-variant/40 bg-surface-container-lowest/95 p-3 backdrop-blur">
+        <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl items-end gap-2">
+          <div className="flex flex-1 items-end rounded-2xl border border-outline-variant/70 bg-surface-container-lowest px-3 py-1.5 shadow-card focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a question about your documents..."
+              aria-label="Message"
+              className="max-h-40 w-full resize-none bg-transparent py-1 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none"
+            />
+          </div>
+          {isStreaming ? (
+            <Button type="button" size="icon" variant="outline" onClick={stopGenerating} title="Stop generating" aria-label="Stop generating">
+              <Square className="h-3.5 w-3.5" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              size="icon"
+              disabled={!message.trim() || messageTooLong}
+              aria-label="Send message"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          )}
+        </form>
+        {messageLength > MAX_MESSAGE_LENGTH * 0.9 ? (
+          <p
+            className={cn(
+              'mx-auto mt-1 max-w-3xl text-right text-[11px]',
+              messageTooLong ? 'font-medium text-danger' : 'text-on-surface-variant/70',
+            )}
+            aria-live="polite"
+          >
+            {messageTooLong
+              ? `Message is too long (${messageLength}/${MAX_MESSAGE_LENGTH} characters).`
+              : `${messageLength}/${MAX_MESSAGE_LENGTH}`}
+          </p>
+        ) : (
+          <p className="mt-1 text-center text-[11px] text-on-surface-variant/70">
+            Answers are grounded in your organization&apos;s processed documents.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

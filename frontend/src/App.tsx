@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+﻿import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import AppShell from './components/layout/AppShell';
@@ -23,61 +23,66 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * A data router is required for the chat navigation guard (`useBlocker`), which
+ * makes sure an in-flight answer is never discarded silently.
+ */
+const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: (
+      <PublicOnlyRoute>
+        <LoginPage />
+      </PublicOnlyRoute>
+    ),
+  },
+  { path: '/set-password', element: <SetPasswordPage /> },
+  { path: '/reset-password', element: <ResetPasswordPage /> },
+  {
+    element: (
+      <ProtectedRoute>
+        <AppShell />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <Navigate to="/chat" replace /> },
+      { path: 'chat', element: <ChatPage /> },
+      { path: 'chat/:sessionId', element: <ChatPage /> },
+      { path: 'documents', element: <DocumentsPage /> },
+      {
+        path: 'admin/users',
+        element: (
+          <AdminRoute>
+            <AdminUsersPage />
+          </AdminRoute>
+        ),
+      },
+      {
+        path: 'admin/users/:userId/edit',
+        element: (
+          <AdminRoute>
+            <EditUserPage />
+          </AdminRoute>
+        ),
+      },
+      {
+        path: 'admin/departments',
+        element: (
+          <AdminRoute>
+            <DepartmentsPage />
+          </AdminRoute>
+        ),
+      },
+      { path: 'profile', element: <ProfilePage /> },
+    ],
+  },
+  { path: '*', element: <Navigate to="/chat" replace /> },
+]);
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route
-            path="/login"
-            element={
-              <PublicOnlyRoute>
-                <LoginPage />
-              </PublicOnlyRoute>
-            }
-          />
-          <Route path="/set-password" element={<SetPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/chat" replace />} />
-            <Route path="chat" element={<ChatPage />} />
-            <Route path="chat/:sessionId" element={<ChatPage />} />
-            <Route path="documents" element={<DocumentsPage />} />
-            <Route
-              path="admin/users"
-              element={
-                <AdminRoute>
-                  <AdminUsersPage />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="admin/users/:userId/edit"
-              element={
-                <AdminRoute>
-                  <EditUserPage />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="admin/departments"
-              element={
-                <AdminRoute>
-                  <DepartmentsPage />
-                </AdminRoute>
-              }
-            />
-            <Route path="profile" element={<ProfilePage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <RouterProvider router={router} />
       <Toaster position="top-right" richColors closeButton />
     </QueryClientProvider>
   );

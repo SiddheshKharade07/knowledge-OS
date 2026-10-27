@@ -11,6 +11,7 @@ import com.example.KnowledgeOS.dto.request.SendChatMessageRequest;
 import com.example.KnowledgeOS.entity.ChatMessage;
 import com.example.KnowledgeOS.entity.ChatSession;
 import com.example.KnowledgeOS.entity.User;
+import com.example.KnowledgeOS.exception.GenerationException;
 import com.example.KnowledgeOS.exception.ResourceNotFoundException;
 import com.example.KnowledgeOS.repository.ChatMessageRepository;
 import com.example.KnowledgeOS.repository.ChatSessionRepository;
@@ -31,18 +32,25 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.Exceptions;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
+
+    private static final long STREAM_TIMEOUT_MS = 300_000L;
+    private static final String DEFAULT_TITLE = "New chat";
 
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
@@ -50,6 +58,7 @@ public class ChatServiceImpl implements ChatService {
     private final AuthUtil authUtil;
     private final RagPipelineService ragPipelineService;
     private final ObjectMapper objectMapper;
+    private final ExecutorService chatStreamExecutor;
 
     @Override
     @Transactional
@@ -58,9 +67,16 @@ public class ChatServiceImpl implements ChatService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        // Reuse an existing draft instead of accumulating empty sessions when a client
+        // asks for a new chat repeatedly without sending anything.
+        List<ChatSession> existingDrafts = chatSessionRepository.findEmptyByUserId(userId);
+        if (!existingDrafts.isEmpty()) {
+            return ChatSessionDto.summary(existingDrafts.get(0));
+        }
+
         ChatSession session = ChatSession.builder()
                 .user(user)
-                .title("New chat")
+                .title(DEFAULT_TITLE)
                 .messages(new ArrayList<>())
                 .build();
         ChatSession saved = chatSessionRepository.save(session);
@@ -71,7 +87,9 @@ public class ChatServiceImpl implements ChatService {
     @Transactional(readOnly = true)
     public List<ChatSessionDto> listSessions() {
         Long userId = authUtil.getCurrentUserId();
-        List<ChatSession> sessions = chatSessionRepository.findAllByUserIdOrderByUpdatedAtDesc(userId);
+        // Only conversations that contain messages are real conversations. Drafts and
+        // legacy empty sessions never appear in history.
+        List<ChatSession> sessions = chatSessionRepository.findNonEmptyByUserId(userId);
         return sessions.stream()
                 .map(ChatSessionDto::summary)
                 .toList();
@@ -84,7 +102,7 @@ public class ChatServiceImpl implements ChatService {
         ChatSession session = chatSessionRepository.findByIdAndUserId(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chat session not found"));
         List<ChatMessageDto> messages = session.getMessages().stream()
-                .map(msg -> toMessageDto(msg))
+                .map(this::toMessageDto)
                 .toList();
         return ChatSessionDto.fromEntity(session, messages);
     }
@@ -139,43 +157,47 @@ public class ChatServiceImpl implements ChatService {
             session = chatSessionRepository.save(session);
         }
 
-        ChatMessage userMessage = ChatMessage.builder()
-                .session(session)
-                .role("USER")
-                .content(request.message())
-                .build();
-        userMessage = chatMessageRepository.save(userMessage);
-        session.getMessages().add(userMessage);
+        String messageText = request.message().trim();
+        ChatMessage userMessage;
+        if (request.userMessageId() != null) {
+            userMessage = requireOwnedUserMessage(request.userMessageId(), session);
+            messageText = userMessage.getContent();
+        } else {
+            userMessage = chatMessageRepository.save(ChatMessage.builder()
+                    .session(session)
+                    .role("USER")
+                    .content(messageText)
+                    .build());
+        }
 
-        if (session.getTitle() == null || session.getTitle().isBlank() || "New chat".equals(session.getTitle())) {
-            session.setTitle(generateTitle(request.message()));
+        if (needsTitle(session.getTitle())) {
+            session.setTitle(generateTitle(messageText));
         }
 
         RagResponse ragResponse;
         try {
-            ragResponse = ragPipelineService.query(request.message());
+            ragResponse = ragPipelineService.query(messageText);
         } catch (Exception e) {
             log.error("RAG pipeline failed for session {}", session.getId(), e);
             throw e;
         }
 
-        String citationsJson = toJson(ragResponse.citations());
-        String metadataJson = toJson(Map.of(
-                "query", ragResponse.query(),
-                "hasDebugInfo", ragResponse.debugInfo() != null
-        ));
+        String answer = ragResponse.answer();
+        if (answer == null || answer.isBlank()) {
+            throw new GenerationException("The AI service returned an empty answer.");
+        }
 
-        ChatMessage assistantMessage = ChatMessage.builder()
+        ChatMessage assistantMessage = chatMessageRepository.save(ChatMessage.builder()
                 .session(session)
                 .role("ASSISTANT")
-                .content(ragResponse.answer() != null ? ragResponse.answer() : "")
-                .citationsJson(citationsJson)
-                .metadataJson(metadataJson)
-                .build();
-        assistantMessage = chatMessageRepository.save(assistantMessage);
-        session.getMessages().add(assistantMessage);
-
-        chatSessionRepository.save(session);
+                .content(answer)
+                .citationsJson(toJson(ragResponse.citations()))
+                .metadataJson(toJson(Map.of(
+                        "query", ragResponse.query(),
+                        "hasDebugInfo", ragResponse.debugInfo() != null
+                )))
+                .build());
+        chatSessionRepository.touch(session.getId(), Instant.now());
 
         ChatMessageDto userDto = toMessageDto(userMessage);
         ChatMessageDto assistantDto = toMessageDto(assistantMessage);
@@ -188,8 +210,9 @@ public class ChatServiceImpl implements ChatService {
             throw new IllegalArgumentException("message is required");
         }
 
-        // Authenticate on the request thread. Failures here are handled by the
-        // global exception handler and produce a regular JSON error response.
+        // Authenticate and authorize on the request thread. Anything that can fail here
+        // is rendered as a normal JSON ApiError with a proper HTTP status, before any
+        // event-stream bytes are written.
         final Long userId = authUtil.getCurrentUserId();
         if (userId == null) {
             throw new AuthenticationCredentialsNotFoundException("no JWT found");
@@ -204,116 +227,160 @@ public class ChatServiceImpl implements ChatService {
                 ? new ArrayList<>()
                 : new ArrayList<>(currentAuthentication.getAuthorities());
 
-        final String messageText = request.message();
-        final Long requestedSessionId = request.sessionId();
-        final SseEmitter emitter = new SseEmitter(300_000L);
-        final ExecutorService executor = Executors.newSingleThreadExecutor();
+        final User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        executor.execute(() -> {
-            try {
-                // The RAG pipeline reads the caller from the SecurityContext, so the
-                // worker thread needs a real JWT principal, not just an id.
-                SecurityContext context = SecurityContextHolder.createEmptyContext();
-                context.setAuthentication(new UsernamePasswordAuthenticationToken(
-                        new JwtUserPrinciples(userId, username, authorities), null, authorities));
-                SecurityContextHolder.setContext(context);
+        ChatSession session = null;
+        if (request.sessionId() != null) {
+            session = chatSessionRepository.findByIdAndUserId(request.sessionId(), userId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Chat session not found"));
+        }
 
-                User user = userRepository.findById(userId)
-                        .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-
-                final ChatSession session;
-                String title;
-                if (requestedSessionId != null) {
-                    session = chatSessionRepository.findByIdAndUserId(requestedSessionId, userId)
-                            .orElseThrow(() -> new ResourceNotFoundException("Chat session not found"));
-                    title = session.getTitle();
-                } else {
-                    title = generateTitle(messageText);
-                    session = chatSessionRepository.save(ChatSession.builder()
-                            .user(user)
-                            .title(title)
-                            .build());
-                }
-
-                // Persist messages through the repository only. The worker thread has no
-                // Hibernate session, so mutating session.getMessages() would fail lazily.
-                ChatMessage userMessage = chatMessageRepository.save(ChatMessage.builder()
-                        .session(session)
-                        .role("USER")
-                        .content(messageText)
-                        .build());
-
-                if (title == null || title.isBlank() || "New chat".equals(title)) {
-                    title = generateTitle(messageText);
-                    chatSessionRepository.updateTitle(session.getId(), title);
-                }
-
-                final Long sessionId = session.getId();
-                final String sessionTitle = title;
-
-                emitter.send(SseEmitter.event()
-                        .name("meta")
-                        .data(Map.of(
-                                "sessionId", sessionId,
-                                "userMessageId", userMessage.getId(),
-                                "title", sessionTitle)));
-
-                StringBuilder answerBuilder = new StringBuilder();
-                List<Citation> citationsList = new ArrayList<>();
-
-                ragPipelineService.queryStream(messageText)
-                        .doOnNext(event -> {
-                            try {
-                                switch (event.type()) {
-                                    case "content" -> {
-                                        if (event.content() != null) {
-                                            answerBuilder.append(event.content());
-                                            emitter.send(SseEmitter.event()
-                                                    .name("content")
-                                                    .data(Map.of("content", event.content())));
-                                        }
-                                    }
-                                    case "citations" -> {
-                                        if (event.data() instanceof List<?> list) {
-                                            for (Object item : list) {
-                                                if (item instanceof Citation citation) {
-                                                    citationsList.add(citation);
-                                                }
-                                            }
-                                        }
-                                        emitter.send(SseEmitter.event()
-                                                .name("citations")
-                                                .data(Map.of("citations", citationsList)));
-                                    }
-                                    case "done" -> completeStream(
-                                            emitter, session, sessionId, sessionTitle,
-                                            messageText, answerBuilder, citationsList);
-                                    default -> {
-                                        // Unknown event types are ignored on purpose.
-                                    }
-                                }
-                            } catch (IOException ioException) {
-                                // Client went away; abort generation by propagating the error.
-                                throw reactor.core.Exceptions.propagate(ioException);
-                            }
-                        })
-                        .doOnError(ex -> handleStreamError(emitter, ex))
-                        .onErrorResume(ex -> reactor.core.publisher.Flux.empty())
-                        .blockLast();
-            } catch (Exception ex) {
-                if (ex instanceof ResourceNotFoundException || ex instanceof IllegalArgumentException) {
-                    log.warn("Chat stream rejected: {}", ex.getMessage());
-                } else {
-                    log.error("Failed to start chat stream", ex);
-                }
-                handleStreamError(emitter, ex);
-            } finally {
-                SecurityContextHolder.clearContext();
-                executor.shutdown();
+        final String messageText;
+        ChatMessage existingUserMessage = null;
+        if (request.userMessageId() != null) {
+            if (session == null) {
+                throw new IllegalArgumentException("sessionId is required when retrying a message");
             }
-        });
+            existingUserMessage = requireOwnedUserMessage(request.userMessageId(), session);
+            messageText = existingUserMessage.getContent();
+            if (messageText == null || messageText.isBlank()) {
+                throw new IllegalArgumentException("message is required");
+            }
+        } else {
+            messageText = request.message().trim();
+        }
+
+        final SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
+        final StreamContext context = new StreamContext(
+                emitter, userId, user, username, authorities, session, existingUserMessage, messageText);
+
+        try {
+            chatStreamExecutor.execute(() -> runStream(context));
+        } catch (RejectedExecutionException rejected) {
+            log.warn("Chat stream rejected: streaming executor is saturated");
+            sendErrorEvent(emitter, "service_busy",
+                    "KnowledgeOS is handling too many responses right now. Please try again in a moment.",
+                    true,
+                    null);
+            completeQuietly(emitter);
+        }
 
         return emitter;
+    }
+
+    void runStream(StreamContext context) {
+        SseEmitter emitter = context.emitter();
+        SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(new UsernamePasswordAuthenticationToken(
+                new JwtUserPrinciples(context.userId(), context.username(), context.authorities()),
+                null,
+                context.authorities()));
+        SecurityContextHolder.setContext(securityContext);
+
+        Long sessionId = context.session() != null ? context.session().getId() : null;
+        try {
+            ChatSession session = context.session();
+            if (session == null) {
+                session = chatSessionRepository.save(ChatSession.builder()
+                        .user(context.user())
+                        .title(generateTitle(context.message()))
+                        .build());
+            }
+            sessionId = session.getId();
+
+            // The user message is persisted once. Retries pass the existing message id so
+            // a failed generation can be retried without duplicating the prompt.
+            ChatMessage userMessage = context.existingUserMessage();
+            if (userMessage == null) {
+                userMessage = chatMessageRepository.save(ChatMessage.builder()
+                        .session(session)
+                        .role("USER")
+                        .content(context.message())
+                        .build());
+            }
+
+            String title = session.getTitle();
+            if (needsTitle(title)) {
+                title = generateTitle(context.message());
+                chatSessionRepository.updateTitle(sessionId, title);
+            }
+
+            final Long activeSessionId = sessionId;
+            final String sessionTitle = title;
+            final ChatSession activeSession = session;
+
+            sendEvent(emitter, "meta", Map.of(
+                    "sessionId", activeSessionId,
+                    "userMessageId", userMessage.getId(),
+                    "title", sessionTitle));
+
+            StringBuilder answerBuilder = new StringBuilder();
+            List<Citation> citations = new ArrayList<>();
+            AtomicBoolean completed = new AtomicBoolean(false);
+
+            ragPipelineService.queryStream(context.message())
+                    .doOnNext(event -> handleStreamEvent(
+                            emitter, event, answerBuilder, citations, completed,
+                            activeSession, activeSessionId, sessionTitle, context.message()))
+                    .blockLast();
+
+            if (!completed.get()) {
+                throw new GenerationException("The response stream ended before completion.");
+            }
+        } catch (Exception ex) {
+            Throwable cause = Exceptions.unwrap(ex);
+            if (ChatStreamErrorMapper.isClientDisconnect(cause)) {
+                // The browser went away. Stop generation and do not log this as a failure.
+                log.debug("Client disconnected from chat stream (session {})", sessionId);
+                completeQuietly(emitter);
+            } else {
+                sendStreamFailure(emitter, cause, sessionId);
+            }
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private void handleStreamEvent(SseEmitter emitter,
+                                   RagPipelineService.RagStreamEvent event,
+                                   StringBuilder answerBuilder,
+                                   List<Citation> citations,
+                                   AtomicBoolean completed,
+                                   ChatSession session,
+                                   Long sessionId,
+                                   String sessionTitle,
+                                   String messageText) {
+        try {
+            switch (event.type()) {
+                case "content" -> {
+                    if (event.content() != null && !event.content().isEmpty()) {
+                        answerBuilder.append(event.content());
+                        sendEvent(emitter, "content", Map.of("content", event.content()));
+                    }
+                }
+                case "citations" -> {
+                    if (event.data() instanceof List<?> list) {
+                        for (Object item : list) {
+                            if (item instanceof Citation citation) {
+                                citations.add(citation);
+                            }
+                        }
+                    }
+                    sendEvent(emitter, "citations", Map.of("citations", citations));
+                }
+                case "done" -> {
+                    completeStream(emitter, session, sessionId, sessionTitle, messageText, answerBuilder, citations);
+                    completed.set(true);
+                }
+                default -> {
+                    // Unknown event types are ignored on purpose.
+                }
+            }
+        } catch (IOException ioException) {
+            // Client went away; abort generation by terminating the stream.
+            throw Exceptions.propagate(ioException);
+        }
     }
 
     private void completeStream(SseEmitter emitter,
@@ -322,41 +389,65 @@ public class ChatServiceImpl implements ChatService {
                                 String sessionTitle,
                                 String messageText,
                                 StringBuilder answerBuilder,
-                                List<Citation> citationsList) throws IOException {
+                                List<Citation> citations) throws IOException {
         String fullAnswer = answerBuilder.toString();
         if (fullAnswer.isBlank()) {
-            fullAnswer = "I'm sorry, but the retrieved document context does not contain sufficient information to answer your question.";
+            // Never persist or present an empty answer as a success.
+            throw new GenerationException("The AI service returned an empty answer.");
         }
 
         ChatMessage assistantMessage = chatMessageRepository.save(ChatMessage.builder()
                 .session(session)
                 .role("ASSISTANT")
                 .content(fullAnswer)
-                .citationsJson(toJson(citationsList))
+                .citationsJson(toJson(citations))
                 .metadataJson(toJson(Map.of("query", messageText)))
                 .build());
-        chatSessionRepository.touch(sessionId, java.time.Instant.now());
+        chatSessionRepository.touch(sessionId, Instant.now());
 
-        emitter.send(SseEmitter.event()
-                .name("done")
-                .data(Map.of(
-                        "messageId", assistantMessage.getId(),
-                        "sessionId", sessionId,
-                        "title", sessionTitle)));
+        sendEvent(emitter, "done", Map.of(
+                "messageId", assistantMessage.getId(),
+                "sessionId", sessionId,
+                "title", sessionTitle));
         emitter.complete();
     }
 
-    private void handleStreamError(SseEmitter emitter, Throwable ex) {
-        String message = ex.getMessage() != null ? ex.getMessage() : "Stream error";
+    private void sendStreamFailure(SseEmitter emitter, Throwable failure, Long sessionId) {
+        ChatStreamErrorMapper.StreamFailure mapped = ChatStreamErrorMapper.map(failure);
+        if (failure instanceof ResourceNotFoundException || failure instanceof IllegalArgumentException) {
+            log.warn("Chat stream rejected [{}]: {}", mapped.code(), failure.getMessage());
+        } else {
+            log.error("Chat stream failed [{}]", mapped.code(), failure);
+        }
+        sendErrorEvent(emitter, mapped.code(), mapped.message(), mapped.retryable(), sessionId);
+        completeQuietly(emitter);
+    }
+
+    private void sendErrorEvent(SseEmitter emitter,
+                                String code,
+                                String message,
+                                boolean retryable,
+                                Long sessionId) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("code", code);
+        data.put("message", message);
+        data.put("retryable", retryable);
+        if (sessionId != null) {
+            data.put("sessionId", sessionId);
+        }
         try {
-            emitter.send(SseEmitter.event()
-                    .name("error")
-                    .data(Map.of("message", message)));
+            sendEvent(emitter, "error", data);
         } catch (Exception sendFailure) {
+            // The response is no longer writable; nothing else to do.
             log.debug("Could not send SSE error event: {}", sendFailure.getMessage());
         }
-        // Complete normally so the container does not perform an ERROR dispatch on an
-        // already committed response (which would fail authorization a second time).
+    }
+
+    private void sendEvent(SseEmitter emitter, String name, Object data) throws IOException {
+        emitter.send(SseEmitter.event().name(name).data(data));
+    }
+
+    private void completeQuietly(SseEmitter emitter) {
         try {
             emitter.complete();
         } catch (Exception ignored) {
@@ -364,13 +455,28 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
+    private ChatMessage requireOwnedUserMessage(Long userMessageId, ChatSession session) {
+        ChatMessage message = chatMessageRepository.findById(userMessageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Chat message not found"));
+        if (!"USER".equals(message.getRole())
+                || message.getSession() == null
+                || !session.getId().equals(message.getSession().getId())) {
+            throw new ResourceNotFoundException("Chat message not found");
+        }
+        return message;
+    }
+
+    private boolean needsTitle(String title) {
+        return title == null || title.isBlank() || DEFAULT_TITLE.equals(title);
+    }
+
     private String generateTitle(String message) {
         if (message == null) {
-            return "New chat";
+            return DEFAULT_TITLE;
         }
         String trimmed = message.trim();
         if (trimmed.isEmpty()) {
-            return "New chat";
+            return DEFAULT_TITLE;
         }
         if (trimmed.length() <= 60) {
             return trimmed;
@@ -420,13 +526,24 @@ public class ChatServiceImpl implements ChatService {
             return List.of();
         }
         try {
-            com.fasterxml.jackson.core.type.TypeReference<List<T>> typeRef = new com.fasterxml.jackson.core.type.TypeReference<List<T>>() {
-            };
-            List<T> result = objectMapper.readValue(json, objectMapper.getTypeFactory().constructCollectionType(List.class, clazz));
+            List<T> result = objectMapper.readValue(
+                    json, objectMapper.getTypeFactory().constructCollectionType(List.class, clazz));
             return result == null ? List.of() : result;
         } catch (Exception e) {
             log.warn("Failed to deserialize chat message citations", e);
             return List.of();
         }
+    }
+
+    record StreamContext(
+            SseEmitter emitter,
+            Long userId,
+            User user,
+            String username,
+            List<GrantedAuthority> authorities,
+            ChatSession session,
+            ChatMessage existingUserMessage,
+            String message
+    ) {
     }
 }

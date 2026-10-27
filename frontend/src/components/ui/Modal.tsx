@@ -8,17 +8,43 @@ interface ModalProps {
   children: React.ReactNode;
   className?: string;
   sheet?: boolean;
+  /** Accessible name for the dialog. Pass the visible title where possible. */
+  ariaLabel?: string;
 }
 
-export function Modal({ open, onClose, children, className, sheet }: ModalProps) {
+export function Modal({ open, onClose, children, className, sheet, ariaLabel }: ModalProps) {
+  const panelRef = React.useRef<HTMLDivElement>(null);
+
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Keep focus inside the dialog without stealing it from autoFocus fields.
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
@@ -31,6 +57,11 @@ export function Modal({ open, onClose, children, className, sheet }: ModalProps)
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-[#0f172a]/40 backdrop-blur-[1px]" onClick={onClose} />
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        tabIndex={-1}
         className={cn(
           'relative z-10 w-full overflow-hidden bg-surface-container-lowest shadow-modal animate-slide-up',
           sheet ? 'max-h-[85vh] rounded-t-2xl sm:max-h-[90vh] sm:rounded-2xl sm:max-w-lg' : 'max-h-[90vh] rounded-t-2xl sm:rounded-xl sm:max-w-2xl',
@@ -64,6 +95,7 @@ export function ModalHeader({
         {action}
         <button
           onClick={onClose}
+          aria-label="Close"
           className="rounded-lg p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface focus-ring"
         >
           <X className="h-4 w-4" />

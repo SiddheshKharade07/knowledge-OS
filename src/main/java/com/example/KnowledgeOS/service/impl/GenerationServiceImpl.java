@@ -2,6 +2,7 @@ package com.example.KnowledgeOS.service.impl;
 
 import com.example.KnowledgeOS.dto.RagResponse;
 import com.example.KnowledgeOS.dto.RankedChunk;
+import com.example.KnowledgeOS.exception.GenerationException;
 import com.example.KnowledgeOS.service.ContextBuilder;
 import com.example.KnowledgeOS.service.GenerationService;
 import com.example.KnowledgeOS.service.HybridRetrievalService;
@@ -65,7 +66,8 @@ public class GenerationServiceImpl implements GenerationService {
                     .content();
 
             if (answer == null || answer.isBlank()) {
-                answer = "Unable to generate an answer at this time.";
+                // An empty provider response is a failure, not an answer.
+                throw new GenerationException("The AI service returned an empty answer.");
             }
 
             return new RagResponse(
@@ -75,15 +77,11 @@ public class GenerationServiceImpl implements GenerationService {
                     topChunks,
                     retrievalResult != null ? retrievalResult.getDebugInfo() : null
             );
+        } catch (GenerationException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Failed to generate LLM response for query '{}'", userQuery, e);
-            return new RagResponse(
-                    userQuery,
-                    "An error occurred while generating the answer from retrieved context.",
-                    builtContext.getCitations(),
-                    topChunks,
-                    retrievalResult != null ? retrievalResult.getDebugInfo() : null
-            );
+            throw new GenerationException("The AI service could not generate an answer.", e);
         }
     }
 
@@ -106,16 +104,13 @@ public class GenerationServiceImpl implements GenerationService {
             User Question: %s
             """, builtContext.getFormattedContext(), userQuery);
 
-        try {
-            return chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .user(userPrompt)
-                    .stream()
-                    .content()
-                    .filter(content -> content != null);
-        } catch (Exception e) {
-            log.error("Failed to stream LLM response for query '{}'", userQuery, e);
-            return Flux.just("An error occurred while generating the answer from retrieved context.");
-        }
+        // Provider failures must propagate so the chat stream can report a structured
+        // error. Returning a canned "answer" here would falsely mark the turn as done.
+        return chatClient.prompt()
+                .system(SYSTEM_PROMPT)
+                .user(userPrompt)
+                .stream()
+                .content()
+                .filter(content -> content != null);
     }
 }
