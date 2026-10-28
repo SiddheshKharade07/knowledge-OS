@@ -4,6 +4,8 @@ import * as React from 'react';
 import { documentsApi } from '../api/documents';
 import { departmentsApi } from '../api/departments';
 import { Button } from '../components/ui/Button';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { Dropdown } from '../components/ui/Dropdown';
 import { Input } from '../components/ui/Input';
 import { Modal, ModalBody, ModalHeader } from '../components/ui/Modal';
 import { StatusPill } from '../components/ui/StatusPill';
@@ -34,6 +36,7 @@ export default function DocumentsPage() {
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [selectedDeptIds, setSelectedDeptIds] = React.useState<number[]>([]);
   const [uploadModalOpen, setUploadModalOpen] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<Document | null>(null);
 
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -105,6 +108,7 @@ export default function DocumentsPage() {
     mutationFn: (id: number) => documentsApi.delete(id),
     onSuccess: () => {
       toast.success('Document deleted');
+      setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       if (detailId && docsQuery.data?.find((d) => d.id === detailId) === undefined) {
         setDetailId(null);
@@ -141,10 +145,6 @@ export default function DocumentsPage() {
 
   const removeFile = (index: number) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const toggleDepartment = (id: number) => {
-    setSelectedDeptIds((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
   };
 
   const docs = docsQuery.data ?? [];
@@ -304,9 +304,7 @@ export default function DocumentsPage() {
                       variant="ghost"
                       className="text-red-500 hover:text-red-600"
                       onClick={() => {
-                        if (window.confirm('Delete this document? This action cannot be undone.')) {
-                          deleteMutation.mutate(doc.id);
-                        }
+                        setDeleteTarget(doc);
                       }}
                       disabled={deleteMutation.isPending}
                     >
@@ -323,44 +321,55 @@ export default function DocumentsPage() {
 
       <DocumentDetailModal id={detailId} onClose={() => setDetailId(null)} />
 
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete document?"
+        description={
+          <>
+            Are you sure you want to delete{' '}
+            <span className="font-medium text-on-surface">{deleteTarget?.fileName}</span>?
+            This action will remove the document and its associated searchable content.
+          </>
+        }
+        confirmLabel="Delete document"
+        destructive
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+        }}
+      />
+
       <Modal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} className="sm:max-w-2xl">
         <ModalHeader title="Upload documents" description="Select department(s) and documents to upload." onClose={() => setUploadModalOpen(false)} />
         <ModalBody>
           <div className="space-y-4">
             <div className="space-y-2">
-              <p className="text-sm font-medium text-on-surface">Select Department(s)</p>
-              {departmentsQuery.isLoading ? (
-                <p className="text-sm text-on-surface-variant">Loading departments...</p>
-              ) : departmentsQuery.isError ? (
-                <p className="text-sm text-red-500">Failed to load departments. Please try again.</p>
-              ) : departmentOptions.length === 0 ? (
-                <p className="text-sm text-on-surface-variant">
-                  {isAdminUser
+              <Dropdown
+                mode="multi"
+                label="Select Department(s)"
+                placeholder="Select departments"
+                options={departmentOptions.map((dept) => ({ value: dept.id, label: dept.name }))}
+                value={selectedDeptIds}
+                onChange={(value) => setSelectedDeptIds(value.map((v) => Number(v)).filter(Boolean))}
+                searchable={departmentOptions.length > 6}
+                clearable
+                loading={departmentsQuery.isLoading}
+                loadingText="Loading departments..."
+                emptyText={
+                  isAdminUser
                     ? 'No departments available.'
-                    : 'No authorized departments available. An administrator must assign the required department access.'}
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {departmentOptions.map((dept) => {
-                    const selected = selectedDeptIds.includes(dept.id);
-                    return (
-                      <button
-                        key={dept.id}
-                        type="button"
-                        onClick={() => toggleDepartment(dept.id)}
-                        disabled={uploadMutation.isPending}
-                        aria-pressed={selected}
-                        className={selected ? 'rounded-full px-3 py-1 text-sm transition bg-primary text-on-primary' : 'rounded-full px-3 py-1 text-sm transition bg-surface-container-low text-on-surface'}
-                      >
-                        {dept.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {selectedDeptIds.length === 0 ? (
-                <p className="text-xs text-red-500">Please select at least one department before uploading documents.</p>
-              ) : null}
+                    : 'No authorized departments are assigned to your account. Contact an administrator.'
+                }
+                error={
+                  departmentsQuery.isError
+                    ? 'Failed to load departments. Please try again.'
+                    : selectedDeptIds.length === 0
+                      ? 'Please select at least one department before uploading documents.'
+                      : null
+                }
+                disabled={uploadMutation.isPending}
+              />
             </div>
 
             <div className="space-y-2">
@@ -470,3 +479,4 @@ function DocumentDetailModal({ id, onClose }: { id: number | null; onClose: () =
     </Modal>
   );
 }
+

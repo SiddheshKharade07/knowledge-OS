@@ -267,7 +267,10 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
               <button
                 role="menuitem"
                 type="button"
-                onClick={signOut}
+                onClick={() => {
+                  setOpen(false);
+                  signOut();
+                }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-on-surface transition-colors hover:bg-surface-container focus-ring"
               >
                 <LogOut className="h-3.5 w-3.5" />

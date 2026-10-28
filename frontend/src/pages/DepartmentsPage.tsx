@@ -3,6 +3,7 @@ import { Building2, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { departmentsApi } from '../api/departments';
 import { Button } from '../components/ui/Button';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Input } from '../components/ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/ui/Modal';
 import { Spinner } from '../components/ui/Spinner';
@@ -15,6 +16,7 @@ export default function DepartmentsPage() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Department | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<Department | null>(null);
   const [form, setForm] = React.useState({ name: '' });
 
   const departmentsQuery = useQuery({
@@ -52,6 +54,7 @@ export default function DepartmentsPage() {
     mutationFn: (id: number) => departmentsApi.delete(id),
     onSuccess: () => {
       toast.success('Department deleted');
+      setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ['departments'] });
     },
     onError: (err: any) => toast.error(err?.message || 'Failed to delete department'),
@@ -76,9 +79,7 @@ export default function DepartmentsPage() {
   };
 
   const handleDelete = (dept: Department) => {
-    if (confirm(`Delete department "${dept.name}"? This action may be blocked if it has assigned users or documents.`)) {
-      deleteMutation.mutate(dept.id);
-    }
+    setDeleteTarget(dept);
   };
 
   return (
@@ -233,6 +234,25 @@ export default function DepartmentsPage() {
           </ModalFooter>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete department?"
+        description={
+          <>
+            Are you sure you want to delete{' '}
+            <span className="font-medium text-on-surface">{deleteTarget?.name}</span>?
+            This action may be blocked if the department has assigned users or documents.
+          </>
+        }
+        confirmLabel="Delete department"
+        destructive
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+        }}
+      />
     </div>
   );
 }

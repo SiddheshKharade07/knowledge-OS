@@ -1,14 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Building2, Check, ChevronDown, Mail, Search, Shield, UserRound } from 'lucide-react';
+import { ArrowLeft, Mail, Shield, UserRound } from 'lucide-react';
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { departmentsApi } from '../api/departments';
 import { usersApi } from '../api/users';
 import { Button } from '../components/ui/Button';
+import { Dropdown } from '../components/ui/Dropdown';
 import { Input } from '../components/ui/Input';
 import { Spinner } from '../components/ui/Spinner';
-import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/auth';
 import { toast } from 'sonner';
 import type { UserRole } from '../api/types';
@@ -33,17 +32,6 @@ export default function EditUserPage() {
     userRole: 'USER' as UserRole,
     departmentIds: [] as number[],
   });
-  const [deptOpen, setDeptOpen] = React.useState(false);
-  const [deptSearch, setDeptSearch] = React.useState('');
-  const [roleOpen, setRoleOpen] = React.useState(false);
-
-  const deptTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const deptMenuRef = React.useRef<HTMLDivElement>(null);
-  const [deptPos, setDeptPos] = React.useState({ top: 0, left: 0, width: 0, flip: false });
-
-  const roleTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const roleMenuRef = React.useRef<HTMLDivElement>(null);
-  const [rolePos, setRolePos] = React.useState({ top: 0, left: 0, width: 0, flip: false });
 
   const userQuery = useQuery({
     queryKey: ['admin', 'user', userId],
@@ -101,107 +89,12 @@ export default function EditUserPage() {
   });
 
   const departments = departmentsQuery.data ?? [];
-  const filteredDepts = departments.filter((d: any) => {
-    if (!deptSearch.trim()) return true;
-    return d.name.toLowerCase().includes(deptSearch.toLowerCase());
-  });
-  const selectedDepts = departments.filter((d: any) => form.departmentIds.includes(d.id));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (updateMutation.isPending) return;
     updateMutation.mutate();
   };
-
-  const toggleDept = (deptId: number) => {
-    setForm((f) => {
-      if (f.departmentIds.includes(deptId)) {
-        return { ...f, departmentIds: f.departmentIds.filter((id) => id !== deptId) };
-      }
-      return { ...f, departmentIds: [...f.departmentIds, deptId] };
-    });
-  };
-
-  const updateDeptPosition = React.useCallback(() => {
-    if (!deptTriggerRef.current) return;
-    const rect = deptTriggerRef.current.getBoundingClientRect();
-    const menuHeight = 320;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const flip = spaceBelow < menuHeight && rect.top > menuHeight;
-    setDeptPos({
-      top: flip ? rect.top + window.scrollY - menuHeight : rect.bottom + window.scrollY + 6,
-      left: rect.left + window.scrollX,
-      width: rect.width,
-      flip,
-    });
-  }, []);
-
-  const updateRolePosition = React.useCallback(() => {
-    if (!roleTriggerRef.current) return;
-    const rect = roleTriggerRef.current.getBoundingClientRect();
-    const menuHeight = 200;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const flip = spaceBelow < menuHeight && rect.top > menuHeight;
-    setRolePos({
-      top: flip ? rect.top + window.scrollY - menuHeight : rect.bottom + window.scrollY + 6,
-      left: rect.left + window.scrollX,
-      width: rect.width,
-      flip,
-    });
-  }, []);
-
-  React.useEffect(() => {
-    if (!deptOpen) return;
-    updateDeptPosition();
-    const onResize = () => updateDeptPosition();
-    const onScroll = () => updateDeptPosition();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('scroll', onScroll, true);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('scroll', onScroll, true);
-    };
-  }, [deptOpen, updateDeptPosition]);
-
-  React.useEffect(() => {
-    if (!roleOpen) return;
-    updateRolePosition();
-    const onResize = () => updateRolePosition();
-    const onScroll = () => updateRolePosition();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('scroll', onScroll, true);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('scroll', onScroll, true);
-    };
-  }, [roleOpen, updateRolePosition]);
-
-  React.useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (deptOpen && deptTriggerRef.current && deptMenuRef.current) {
-        if (!deptTriggerRef.current.contains(e.target as Node) && !deptMenuRef.current.contains(e.target as Node)) {
-          setDeptOpen(false);
-        }
-      }
-      if (roleOpen && roleTriggerRef.current && roleMenuRef.current) {
-        if (!roleTriggerRef.current.contains(e.target as Node) && !roleMenuRef.current.contains(e.target as Node)) {
-          setRoleOpen(false);
-        }
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setDeptOpen(false);
-        setRoleOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [deptOpen, roleOpen]);
 
   const isSelf = currentUser && userQuery.data && (currentUser as any).id === (userQuery.data as any).id;
 
@@ -289,146 +182,38 @@ export default function EditUserPage() {
           </div>
           <div className="grid gap-5 px-6 py-6">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-on-surface">Role</label>
               <div className="relative">
-                <button
-                  ref={roleTriggerRef}
-                  type="button"
-                  onClick={() => {
-                    if (isSelf) return;
-                    setRoleOpen((o) => !o);
-                    setDeptOpen(false);
-                  }}
+                <Dropdown
+                  mode="single"
+                  label="Role"
+                  options={roles.map((r) => ({ value: r, label: roleLabels[r] || r }))}
+                  value={form.userRole}
+                  onChange={(value) => setForm((f) => ({ ...f, userRole: value as UserRole }))}
+                  searchable={false}
                   disabled={Boolean(isSelf) || updateMutation.isPending}
-                  className={cn(
-                    'flex h-[46px] w-full items-center justify-between rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-3 text-sm text-on-surface shadow-sm transition-all hover:border-[#5145E5]/40 focus:border-[#5145E5] focus:outline-none focus:ring-2 focus:ring-[#5145E5]/10',
-                    isSelf && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <Shield className="h-4 w-4 text-[#5145E5]" />
-                    <span>{roleLabels[form.userRole] || form.userRole}</span>
-                  </div>
-                  <ChevronDown className={cn('h-4 w-4 text-on-surface-variant transition-transform', roleOpen && 'rotate-180')} />
-                </button>
-                {roleOpen && !isSelf && createPortal(
-                  <div
-                    ref={roleMenuRef}
-                    style={{ position: 'absolute', top: rolePos.top, left: rolePos.left, width: rolePos.width, zIndex: 9999 }}
-                    className="overflow-hidden rounded-2xl border border-outline-variant/70 bg-white shadow-[0_20px_60px_rgba(81,69,229,0.18)]"
-                    role="listbox"
-                  >
-                    <div className="max-h-[200px] overflow-y-auto overscroll-contain p-1.5">
-                      {roles.map((r) => {
-                        const selected = form.userRole === r;
-                        return (
-                          <button
-                            key={r}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            onClick={() => {
-                              setForm((f) => ({ ...f, userRole: r }));
-                              setRoleOpen(false);
-                            }}
-                            className={cn(
-                              'flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-surface-container-low',
-                              selected && 'bg-gradient-to-r from-[#eae7ff]/70 to-transparent',
-                            )}
-                          >
-                            <span className="text-on-surface">{roleLabels[r] || r}</span>
-                            {selected ? <Check className="h-4 w-4 text-[#5145E5]" /> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>,
-                  document.body,
-                )}
+                  className="w-full"
+                />
               </div>
               {isSelf ? <p className="text-xs text-on-surface-variant">You cannot change your own role.</p> : null}
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-on-surface">Departments</label>
               <div className="relative">
-                <button
-                  ref={deptTriggerRef}
-                  type="button"
-                  onClick={() => {
-                    setDeptOpen((o) => !o);
-                    setRoleOpen(false);
-                    if (!deptOpen) setDeptSearch('');
-                  }}
-                  className="flex h-[46px] w-full items-center justify-between rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-3 text-sm text-on-surface shadow-sm transition-all hover:border-[#5145E5]/40 hover:shadow-[0_1px_1px_rgba(15,23,42,0.01)] focus:border-[#5145E5] focus:outline-none focus:ring-2 focus:ring-[#5145E5]/10"
-                >
-                  <div className="flex flex-1 items-center gap-2 overflow-hidden">
-                    <Building2 className="h-4 w-4 flex-shrink-0 text-[#5145E5]" />
-                    {selectedDepts.length === 0 ? (
-                      <span className="text-on-surface-variant">Select departments</span>
-                    ) : (
-                      <span className="truncate text-on-surface">
-                        {selectedDepts.map((d: any) => d.name).join(', ')}
-                      </span>
-                    )}
-                  </div>
-                  <ChevronDown className={cn('h-4 w-4 flex-shrink-0 text-on-surface-variant transition-transform', deptOpen && 'rotate-180')} />
-                </button>
-                {deptOpen && createPortal(
-                  <div
-                    ref={deptMenuRef}
-                    style={{ position: 'absolute', top: deptPos.top, left: deptPos.left, width: deptPos.width, zIndex: 9999 }}
-                    className="overflow-hidden rounded-2xl border border-outline-variant/70 bg-white shadow-[0_20px_60px_rgba(81,69,229,0.22)]"
-                  >
-                    <div className="border-b border-outline-variant/40 bg-gradient-to-r from-[#f8f9fc] to-white p-2.5">
-                      <div className="relative">
-                        <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
-                        <Input
-                          value={deptSearch}
-                          onChange={(e) => setDeptSearch(e.target.value)}
-                          placeholder="Search departments..."
-                          className="h-[40px] pl-8"
-                        />
-                      </div>
-                    </div>
-                    <div className="max-h-[260px] overflow-y-auto overscroll-contain p-1.5">
-                      {departmentsQuery.isLoading ? (
-                        <div className="flex items-center justify-center py-6">
-                          <Spinner />
-                        </div>
-                      ) : filteredDepts.length === 0 ? (
-                        <p className="px-2 py-4 text-center text-xs text-on-surface-variant">No departments found</p>
-                      ) : (
-                        filteredDepts.map((d: any) => {
-                          const selected = form.departmentIds.includes(d.id);
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() => toggleDept(d.id)}
-                              className={cn(
-                                'flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-surface-container-low',
-                                selected && 'bg-gradient-to-r from-[#eae7ff]/70 to-transparent',
-                              )}
-                            >
-                              <span className="text-on-surface">{d.name}</span>
-                              {selected ? <Check className="h-4 w-4 text-[#5145E5]" /> : null}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between border-t border-outline-variant/40 bg-surface-container-low/50 px-3 py-2">
-                      <span className="text-xs text-on-surface-variant">{form.departmentIds.length} selected</span>
-                      <Button size="sm" variant="ghost" onClick={() => setDeptOpen(false)} className="h-[32px]">
-                        Done
-                      </Button>
-                    </div>
-                  </div>,
-                  document.body,
-                )}
+                <Dropdown
+                  mode="multi"
+                  label="Departments"
+                  placeholder="Select departments"
+                  options={departments.map((d: any) => ({ value: d.id, label: d.name }))}
+                  value={form.departmentIds}
+                  onChange={(value) => setForm((f) => ({ ...f, departmentIds: value.map((v) => Number(v)).filter(Boolean) }))}
+                  searchable={departments.length > 6}
+                  clearable
+                  loading={departmentsQuery.isLoading}
+                  loadingText="Loading departments..."
+                  emptyText="No departments available."
+                  className="w-full"
+                />
               </div>
-              <p className="text-xs text-on-surface-variant">Click to select or deselect multiple departments.</p>
             </div>
           </div>
         </div>

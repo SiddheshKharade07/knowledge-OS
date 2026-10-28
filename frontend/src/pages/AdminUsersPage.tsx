@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { usersApi } from '../api/users';
 import { departmentsApi } from '../api/departments';
 import { Button } from '../components/ui/Button';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { Dropdown } from '../components/ui/Dropdown';
 import { Input } from '../components/ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../components/ui/Modal';
 import { Spinner } from '../components/ui/Spinner';
@@ -23,6 +25,7 @@ export default function AdminUsersPage() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
   const [editingUser, setEditingUser] = React.useState<(UserSummary & { departmentIds?: number[] | null }) | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<UserSummary | null>(null);
   const [form, setForm] = React.useState({
     username: '',
     email: '',
@@ -93,6 +96,7 @@ export default function AdminUsersPage() {
     mutationFn: (id: number) => usersApi.delete(id),
     onSuccess: () => {
       toast.success('User deleted');
+      setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
     },
     onError: (err: any) => toast.error(err?.message || 'Failed to delete user'),
@@ -254,7 +258,7 @@ export default function AdminUsersPage() {
                       variant="ghost"
                       className="h-[38px]"
                       onClick={() => {
-                        if (confirm('Delete this user?')) deleteMutation.mutate(u.id);
+                        setDeleteTarget(u);
                       }}
                       disabled={deleteMutation.isPending}
                     >
@@ -287,38 +291,27 @@ export default function AdminUsersPage() {
               <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} required className="h-[46px]" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-on-surface">Role</label>
-              <select
+              <Dropdown
+                mode="single"
+                label="Role"
+                options={roles.map((r) => ({ value: r, label: r }))}
                 value={form.userRole}
-                onChange={(e) => setForm((f) => ({ ...f, userRole: e.target.value as UserRole }))}
-                className="h-[46px] w-full rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 text-sm text-on-surface"
-              >
-                {roles.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => setForm((f) => ({ ...f, userRole: value as UserRole }))}
+                searchable={false}
+              />
               <p className="text-xs text-on-surface-variant">Creating ADMIN accounts is not permitted.</p>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-on-surface">Departments</label>
-              <select
-                multiple
-                value={form.departmentIds.map(String)}
-                onChange={(e) => {
-                  const values = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
-                  setForm((f) => ({ ...f, departmentIds: values.filter(Boolean) }));
-                }}
-                className="min-h-[120px] w-full min-w-[240px] rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 py-1.5 text-sm text-on-surface"
-              >
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-on-surface-variant">Hold Ctrl/Command to select multiple departments.</p>
+              <Dropdown
+                mode="multi"
+                label="Departments"
+                placeholder="Select departments"
+                options={departments.map((d) => ({ value: d.id, label: d.name }))}
+                value={form.departmentIds}
+                onChange={(value) => setForm((f) => ({ ...f, departmentIds: value.map((v) => Number(v)).filter(Boolean) }))}
+                searchable={departments.length > 6}
+                clearable
+              />
             </div>
           </ModalBody>
           <ModalFooter>
@@ -351,41 +344,30 @@ export default function AdminUsersPage() {
               <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} required className="h-[46px]" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-on-surface">Role</label>
-              <select
+              <Dropdown
+                mode="single"
+                label="Role"
+                options={roles.map((r) => ({ value: r, label: r }))}
                 value={form.userRole}
-                onChange={(e) => setForm((f) => ({ ...f, userRole: e.target.value as UserRole }))}
-                className="h-[46px] w-full rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 text-sm text-on-surface"
+                onChange={(value) => setForm((f) => ({ ...f, userRole: value as UserRole }))}
+                searchable={false}
                 disabled={editingUser?.id === currentUser?.id}
-              >
-                {roles.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
+              />
               {editingUser?.id === currentUser?.id ? (
                 <p className="text-xs text-on-surface-variant">You cannot change your own role.</p>
               ) : null}
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-on-surface">Departments</label>
-              <select
-                multiple
-                value={form.departmentIds.map(String)}
-                onChange={(e) => {
-                  const values = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
-                  setForm((f) => ({ ...f, departmentIds: values.filter(Boolean) }));
-                }}
-                className="min-h-[120px] w-full min-w-[240px] rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 py-1.5 text-sm text-on-surface"
-              >
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-on-surface-variant">Hold Ctrl/Command to select multiple departments.</p>
+              <Dropdown
+                mode="multi"
+                label="Departments"
+                placeholder="Select departments"
+                options={departments.map((d) => ({ value: d.id, label: d.name }))}
+                value={form.departmentIds}
+                onChange={(value) => setForm((f) => ({ ...f, departmentIds: value.map((v) => Number(v)).filter(Boolean) }))}
+                searchable={departments.length > 6}
+                clearable
+              />
             </div>
           </ModalBody>
           <ModalFooter>
@@ -399,6 +381,25 @@ export default function AdminUsersPage() {
           </ModalFooter>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete user?"
+        description={
+          <>
+            Are you sure you want to delete{' '}
+            <span className="font-medium text-on-surface">{deleteTarget?.username || deleteTarget?.email}</span>?
+            This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete user"
+        destructive
+        busy={deleteMutation.isPending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+        }}
+      />
     </div>
   );
 }

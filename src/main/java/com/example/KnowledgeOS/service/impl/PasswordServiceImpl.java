@@ -13,6 +13,7 @@ import com.example.KnowledgeOS.security.AuthUtil;
 import com.example.KnowledgeOS.service.AccountTokenService;
 import com.example.KnowledgeOS.service.EmailService;
 import com.example.KnowledgeOS.service.PasswordService;
+import com.example.KnowledgeOS.util.PasswordPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,6 +49,8 @@ public class PasswordServiceImpl implements PasswordService {
     @Override
     @Transactional
     public PasswordMessageResponse setupPassword(SetPasswordRequest request) {
+        PasswordPolicy.validateNewPassword(request.newPassword());
+
         User user = accountTokenService.consumeToken(
                 request.token(), AccountTokenPurpose.PASSWORD_SETUP);
 
@@ -81,6 +84,8 @@ public class PasswordServiceImpl implements PasswordService {
     @Override
     @Transactional
     public PasswordMessageResponse resetPassword(ResetPasswordRequest request) {
+        PasswordPolicy.validateNewPassword(request.newPassword());
+
         User user = accountTokenService.consumeToken(
                 request.token(), AccountTokenPurpose.PASSWORD_RESET);
 
