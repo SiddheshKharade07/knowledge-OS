@@ -222,7 +222,7 @@ export default function AdminUsersPage() {
                     <select
                       value={u.userRole}
                       onChange={(e) => roleMutation.mutate({ id: u.id, userRole: e.target.value as UserRole })}
-                      className="h-[42px] rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 text-sm text-on-surface"
+                      className="h-[42px] max-w-[160px] rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 text-sm text-on-surface"
                       disabled={roleMutation.isPending}
                     >
                       {roles.map((r) => (
@@ -310,7 +310,7 @@ export default function AdminUsersPage() {
                   const values = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
                   setForm((f) => ({ ...f, departmentIds: values.filter(Boolean) }));
                 }}
-                className="min-h-[120px] w-full rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 py-1.5 text-sm text-on-surface"
+                className="min-h-[120px] w-full min-w-[240px] rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 py-1.5 text-sm text-on-surface"
               >
                 {departments.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -377,7 +377,7 @@ export default function AdminUsersPage() {
                   const values = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
                   setForm((f) => ({ ...f, departmentIds: values.filter(Boolean) }));
                 }}
-                className="min-h-[120px] w-full rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 py-1.5 text-sm text-on-surface"
+                className="min-h-[120px] w-full min-w-[240px] rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-2.5 py-1.5 text-sm text-on-surface"
               >
                 {departments.map((d) => (
                   <option key={d.id} value={d.id}>

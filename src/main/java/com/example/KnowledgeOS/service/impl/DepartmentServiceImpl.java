@@ -5,6 +5,7 @@ import com.example.KnowledgeOS.entity.Department;
 import com.example.KnowledgeOS.exception.ResourceNotFoundException;
 import com.example.KnowledgeOS.mapper.DepartmentMapper;
 import com.example.KnowledgeOS.repository.DepartmentRepository;
+import com.example.KnowledgeOS.repository.UserRepository;
 import com.example.KnowledgeOS.service.DepartmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ public class DepartmentServiceImpl implements DepartmentService {
 
     private final DepartmentRepository departmentRepository;
     private final DepartmentMapper departmentMapper;
+    private final UserRepository userRepository;
 
     @Override
     @Transactional
@@ -41,10 +43,23 @@ public class DepartmentServiceImpl implements DepartmentService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<DepartmentDto> getAllDepartments() {
         List<Department> departments = departmentRepository.findAll();
+        java.util.Map<Long, Long> counts = new java.util.HashMap<>();
+        for (Object[] row : userRepository.countUsersGroupByDepartment()) {
+            Long deptId = row[0] == null ? null : ((Number) row[0]).longValue();
+            Long cnt = row[1] == null ? 0L : ((Number) row[1]).longValue();
+            if (deptId != null) {
+                counts.put(deptId, cnt);
+            }
+        }
         List<DepartmentDto> departmentDtos = departments.stream()
-                .map(department -> departmentMapper.toDepartmentDto(department))
+                .map(department -> {
+                    Long c = counts.getOrDefault(department.getId(), 0L);
+                    DepartmentDto dto = departmentMapper.toDepartmentDto(department);
+                    return new DepartmentDto(dto.id(), dto.name(), dto.description(), c);
+                })
                 .toList();
 
         return departmentDtos;

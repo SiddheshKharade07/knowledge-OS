@@ -59,6 +59,7 @@ public class ChatServiceImpl implements ChatService {
     private final RagPipelineService ragPipelineService;
     private final ObjectMapper objectMapper;
     private final ExecutorService chatStreamExecutor;
+    private final org.springframework.ai.chat.client.ChatClient chatClient;
 
     @Override
     @Transactional
@@ -134,6 +135,37 @@ public class ChatServiceImpl implements ChatService {
         chatSessionRepository.delete(session);
     }
 
+    private String generateSmartTitle(String message) {
+        if (message == null || message.isBlank()) {
+            return DEFAULT_TITLE;
+        }
+        String base = generateTitle(message);
+        try {
+            if (chatClient != null) {
+                String prompt = "Generate a concise, descriptive chat title for the following user question. " +
+                        "Return only the title (3-7 words), no quotes, no punctuation at the end, no explanation.\n\n" +
+                        message.trim();
+                String response = chatClient.prompt()
+                        .user(prompt)
+                        .call()
+                        .content();
+                if (response != null) {
+                    String cleaned = response.trim().replaceAll("^[\"'\\s]+|[\"'\\s]+$", "");
+                    cleaned = cleaned.replaceAll("[\\r\\n]+", " ");
+                    if (cleaned.length() > 60) {
+                        cleaned = cleaned.substring(0, 60).trim();
+                    }
+                    if (cleaned.length() >= 3 && !cleaned.equalsIgnoreCase("New chat")) {
+                        return cleaned;
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Failed to generate AI title, falling back to heuristic", ex);
+        }
+        return base;
+    }
+
     @Override
     @Transactional
     public ChatMessageResponse sendMessage(SendChatMessageRequest request) {
@@ -151,7 +183,7 @@ public class ChatServiceImpl implements ChatService {
         } else {
             session = ChatSession.builder()
                     .user(user)
-                    .title(generateTitle(request.message()))
+                    .title(generateSmartTitle(request.message()))
                     .messages(new ArrayList<>())
                     .build();
             session = chatSessionRepository.save(session);
@@ -170,8 +202,14 @@ public class ChatServiceImpl implements ChatService {
                     .build());
         }
 
-        if (needsTitle(session.getTitle())) {
-            session.setTitle(generateTitle(messageText));
+        if (needsTitle(session.getTitle()) || DEFAULT_TITLE.equals(session.getTitle())) {
+            String newTitle = generateSmartTitle(messageText);
+            session.setTitle(newTitle);
+            try {
+                chatSessionRepository.updateTitle(session.getId(), newTitle);
+            } catch (Exception ex) {
+                log.debug("Failed to update title for session {}", session.getId(), ex);
+            }
         }
 
         RagResponse ragResponse;
@@ -301,9 +339,13 @@ public class ChatServiceImpl implements ChatService {
             }
 
             String title = session.getTitle();
-            if (needsTitle(title)) {
-                title = generateTitle(context.message());
-                chatSessionRepository.updateTitle(sessionId, title);
+            if (needsTitle(title) || DEFAULT_TITLE.equals(title)) {
+                title = generateSmartTitle(context.message());
+                try {
+                    chatSessionRepository.updateTitle(sessionId, title);
+                } catch (Exception ex) {
+                    log.debug("Failed to update title for session {}", sessionId, ex);
+                }
             }
 
             final Long activeSessionId = sessionId;

@@ -12,6 +12,10 @@ public interface StorageService {
 
     DocumentResponse uploadFile(MultipartFile file) throws IOException;
 
+    DocumentResponse uploadFile(MultipartFile file, java.util.List<Long> departmentIds) throws IOException;
+
+    java.util.List<DocumentResponse> uploadFiles(java.util.List<MultipartFile> files, java.util.List<Long> departmentIds) throws IOException;
+
     DocumentResponse uploadFileViaFilePath(String fileName) throws IOException;
 
     List<DocumentResponse> listDocuments();
@@ -19,4 +23,6 @@ public interface StorageService {
     List<DocumentChunkResponse> getDocumentChunks(Long documentId);
 
     FileContentResponse getFileContent(Long documentId);
+
+    void deleteDocument(Long documentId);
 }

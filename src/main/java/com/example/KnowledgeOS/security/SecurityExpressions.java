@@ -43,5 +43,44 @@ public class SecurityExpressions {
     public boolean canManageSystemSettings() {
         return hasPermission(SystemPermission.MANAGE_SYSTEM_SETTINGS);
     }
+
+    public boolean canUploadDocuments() {
+        return hasPermission(SystemPermission.UPLOAD_DOCUMENTS);
+    }
+
+    public boolean canUpdateDocuments() {
+        return hasPermission(SystemPermission.UPDATE_DOCUMENTS);
+    }
+
+    public boolean canDeleteDocuments() {
+        return hasPermission(SystemPermission.DELETE_DOCUMENTS);
+    }
+
+    public boolean canManageDocuments() {
+        return hasPermission(SystemPermission.UPLOAD_DOCUMENTS)
+                || hasPermission(SystemPermission.UPDATE_DOCUMENTS)
+                || hasPermission(SystemPermission.DELETE_DOCUMENTS)
+                || hasPermission(SystemPermission.MANAGE_DOCUMENT_PERMISSIONS);
+    }
+
+    public boolean isAdmin() {
+        Long userId = authUtil.getCurrentUserId();
+        if (userId == null) {
+            return false;
+        }
+        return userRepository.findRoleByUserId(userId)
+                .map(role -> role == com.example.KnowledgeOS.enums.UserRole.ADMIN)
+                .orElse(false);
+    }
+
+    public boolean isKnowledgeManager() {
+        Long userId = authUtil.getCurrentUserId();
+        if (userId == null) {
+            return false;
+        }
+        return userRepository.findRoleByUserId(userId)
+                .map(role -> role == com.example.KnowledgeOS.enums.UserRole.KNOWLEDGE_MANAGER)
+                .orElse(false);
+    }
 }
 

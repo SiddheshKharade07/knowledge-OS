@@ -57,6 +57,9 @@ public class DocumentAccessServiceImpl implements DocumentAccessService {
         }
         try {
             User currentUser = getCurrentUser();
+            if (currentUser.getUserRole() != null && currentUser.getUserRole().name().equals("ADMIN")) {
+                return true;
+            }
             if (document.getOwner() != null && document.getOwner().getId() != null
                     && document.getOwner().getId().equals(currentUser.getId())) {
                 return true;

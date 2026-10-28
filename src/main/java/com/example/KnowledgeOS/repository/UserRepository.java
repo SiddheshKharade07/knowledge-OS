@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 import java.util.Optional;
 
 @Repository
@@ -25,6 +27,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<UserRole> findRoleByUserId(@Param("userId") Long userId);
 
     long countByUserRoleAndActiveTrue(UserRole userRole);
+
+    @Query("SELECT COUNT(u) FROM User u JOIN u.departments d WHERE d.id = :departmentId")
+    long countByDepartmentId(@Param("departmentId") Long departmentId);
+
+    @Query("SELECT d.id as departmentId, COUNT(u) as cnt FROM User u JOIN u.departments d GROUP BY d.id")
+    List<Object[]> countUsersGroupByDepartment();
 
     Page<User> findAll(Pageable pageable);
 }

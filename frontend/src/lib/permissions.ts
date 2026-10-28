@@ -5,7 +5,7 @@ export function isAdmin(user: UserProfile | null | undefined): boolean {
 }
 
 export function canManageDocs(user: UserProfile | null | undefined): boolean {
-  return user?.userRole === 'ADMIN';
+  return user?.userRole === 'ADMIN' || user?.userRole === 'KNOWLEDGE_MANAGER';
 }
 
 export function canManageUsers(user: UserProfile | null | undefined): boolean {

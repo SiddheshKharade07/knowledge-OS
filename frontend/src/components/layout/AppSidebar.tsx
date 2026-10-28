@@ -27,7 +27,7 @@ import { Input } from '../ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
 import { Spinner } from '../ui/Spinner';
 import { cn, getInitials } from '../../lib/utils';
-import { isAdmin } from '../../lib/permissions';
+import { isAdmin, canManageDocs } from '../../lib/permissions';
 import { useAuthStore } from '../../stores/auth';
 import { useChatActivity } from '../chat/chatActivity';
 
@@ -295,6 +295,7 @@ export function AppSidebar({ collapsed = false, onToggleCollapse, mobile = false
   const queryClient = useQueryClient();
   const { activity, allowNextNavigation } = useChatActivity();
   const admin = isAdmin(user);
+  const canManageDocuments = canManageDocs(user);
 
   const isChatRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
   const activeSessionId = React.useMemo(() => {
@@ -462,7 +463,14 @@ export function AppSidebar({ collapsed = false, onToggleCollapse, mobile = false
       </div>
 
       <nav aria-label="Primary" className={cn('shrink-0 space-y-0.5', collapsed ? 'px-2' : 'px-2')}>
-        {workspaceItems.map(renderNavItem)}
+        {workspaceItems
+          .filter((item) => {
+            if (item.to === '/documents') {
+              return canManageDocuments || isAdmin(user);
+            }
+            return true;
+          })
+          .map(renderNavItem)}
         {admin ? (
           <>
             {!collapsed ? (

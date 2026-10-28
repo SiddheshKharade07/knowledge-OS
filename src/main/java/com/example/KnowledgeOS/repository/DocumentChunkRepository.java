@@ -29,7 +29,8 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
             JOIN documents d ON c.document_id = d.id
             WHERE c.tsv @@ websearch_to_tsquery('english', :query)
               AND (
-                    d.owner = :userId
+                    EXISTS (SELECT 1 FROM users u WHERE u.id = :userId AND u.user_role = 'ADMIN')
+                 OR d.owner = :userId
                  OR EXISTS (
                         SELECT 1 FROM document_departments dd
                         WHERE dd.document_id = d.id
@@ -57,7 +58,8 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
             JOIN documents d ON c.document_id = d.id
             WHERE c.tsv @@ to_tsquery('english', :tsQuery)
               AND (
-                    d.owner = :userId
+                    EXISTS (SELECT 1 FROM users u WHERE u.id = :userId AND u.user_role = 'ADMIN')
+                 OR d.owner = :userId
                  OR EXISTS (
                         SELECT 1 FROM document_departments dd
                         WHERE dd.document_id = d.id
@@ -86,7 +88,8 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Lo
             WHERE c.embedding IS NOT NULL
               AND (1.0 - (c.embedding <=> CAST(:vectorStr AS vector))) >= :similarityThreshold
               AND (
-                    d.owner = :userId
+                    EXISTS (SELECT 1 FROM users u WHERE u.id = :userId AND u.user_role = 'ADMIN')
+                 OR d.owner = :userId
                  OR EXISTS (
                         SELECT 1 FROM document_departments dd
                         WHERE dd.document_id = d.id

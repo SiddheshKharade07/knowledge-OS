@@ -115,6 +115,7 @@ export default function DepartmentsPage() {
             <thead>
               <tr className="border-b border-outline-variant/40 bg-surface-container-low">
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-on-surface-variant">Name</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-on-surface-variant">Members</th>
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-on-surface-variant">ID</th>
                 <th className="px-4 py-2.5 text-right text-xs font-medium text-on-surface-variant">Actions</th>
               </tr>
@@ -122,13 +123,13 @@ export default function DepartmentsPage() {
             <tbody>
               {departmentsQuery.isLoading ? (
                 <tr>
-                  <td colSpan={3} className="py-10 text-center">
+                  <td colSpan={4} className="py-10 text-center">
                     <Spinner className="mx-auto" />
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="py-10 text-center text-on-surface-variant">
+                  <td colSpan={4} className="py-10 text-center text-on-surface-variant">
                     <div className="flex flex-col items-center gap-2">
                       <Building2 className="h-6 w-6" />
                       <p>No departments found</p>
@@ -139,6 +140,7 @@ export default function DepartmentsPage() {
                 filtered.map((dept) => (
                   <tr key={dept.id} className="border-b border-outline-variant/30 last:border-0">
                     <td className="px-4 py-3 font-medium text-on-surface">{dept.name}</td>
+                    <td className="px-4 py-3 text-on-surface-variant">{typeof dept.userCount === 'number' ? dept.userCount : 0}</td>
                     <td className="px-4 py-3 text-on-surface-variant">{dept.id}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
