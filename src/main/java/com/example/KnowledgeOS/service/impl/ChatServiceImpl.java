@@ -142,9 +142,16 @@ public class ChatServiceImpl implements ChatService {
         String base = generateTitle(message);
         try {
             if (chatClient != null) {
-                String prompt = "Generate a concise, descriptive chat title for the following user question. " +
-                        "Return only the title (3-7 words), no quotes, no punctuation at the end, no explanation.\n\n" +
-                        message.trim();
+                String prompt = "You are an expert at creating short, meaningful titles for conversations. " +
+                        "Given the user's first message, identify the main topic/purpose and generate a concise title.\n\n" +
+                        "Rules:\n" +
+                        "- Use 3-7 words maximum\n" +
+                        "- Describe the topic/purpose, NOT a copy of the question\n" +
+                        "- Remove greetings, filler words (please, can you, help me), and question phrasing\n" +
+                        "- Preserve key technical terms and entities\n" +
+                        "- Return only the title, no quotes, no explanation, no trailing punctuation\n" +
+                        "- Avoid generic titles like 'New Chat' or 'Question'\n\n" +
+                        "User message: " + message.trim() + "\n\nTitle:";
                 String response = chatClient.prompt()
                         .user(prompt)
                         .call()
@@ -152,10 +159,11 @@ public class ChatServiceImpl implements ChatService {
                 if (response != null) {
                     String cleaned = response.trim().replaceAll("^[\"'\\s]+|[\"'\\s]+$", "");
                     cleaned = cleaned.replaceAll("[\\r\\n]+", " ");
+                    cleaned = cleaned.replaceAll("[.!?]+$", "").trim();
                     if (cleaned.length() > 60) {
-                        cleaned = cleaned.substring(0, 60).trim();
+                        cleaned = cleaned.substring(0, 57).trim() + "...";
                     }
-                    if (cleaned.length() >= 3 && !cleaned.equalsIgnoreCase("New chat")) {
+                    if (cleaned.length() >= 3 && !cleaned.equalsIgnoreCase("New chat") && !cleaned.equalsIgnoreCase("Chat session")) {
                         return cleaned;
                     }
                 }
@@ -214,7 +222,8 @@ public class ChatServiceImpl implements ChatService {
 
         RagResponse ragResponse;
         try {
-            ragResponse = ragPipelineService.query(messageText);
+            List<com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage> history = loadHistoryForSession(session.getId(), userMessage.getId());
+            ragResponse = ragPipelineService.query(messageText, history);
         } catch (Exception e) {
             log.error("RAG pipeline failed for session {}", session.getId(), e);
             throw e;
@@ -361,7 +370,8 @@ public class ChatServiceImpl implements ChatService {
             List<Citation> citations = new ArrayList<>();
             AtomicBoolean completed = new AtomicBoolean(false);
 
-            ragPipelineService.queryStream(context.message())
+            List<com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage> streamHistory = loadHistoryForSession(activeSessionId, userMessage.getId());
+            ragPipelineService.queryStream(context.message(), streamHistory)
                     .doOnNext(event -> handleStreamEvent(
                             emitter, event, answerBuilder, citations, completed,
                             activeSession, activeSessionId, sessionTitle, context.message()))
@@ -520,10 +530,29 @@ public class ChatServiceImpl implements ChatService {
         if (trimmed.isEmpty()) {
             return DEFAULT_TITLE;
         }
-        if (trimmed.length() <= 60) {
-            return trimmed;
+        // Remove question words and common prefixes to extract topic
+        String cleaned = trimmed
+                .replaceAll("^(Can you|Could you|Please|Help me|I need|I want to know|What is|What are|How do|How to|Explain)\\s+", "")
+                .replaceAll("\\?$", "")
+                .trim();
+        if (cleaned.isEmpty()) {
+            cleaned = trimmed;
         }
-        return trimmed.substring(0, 57) + "...";
+        if (cleaned.length() <= 60) {
+            return cleaned;
+        }
+        // Try to cut at word boundary
+        String[] words = cleaned.split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String w : words) {
+            if (sb.length() + w.length() + 1 > 57) break;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(w);
+        }
+        if (sb.length() == 0) {
+            return cleaned.substring(0, 57) + "...";
+        }
+        return sb.toString().trim() + "...";
     }
 
     private ChatMessageDto toMessageDto(ChatMessage message) {
@@ -561,6 +590,42 @@ public class ChatServiceImpl implements ChatService {
             log.warn("Failed to deserialize chat message metadata", e);
             return null;
         }
+    }
+
+    private List<com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage> loadHistoryForSession(Long sessionId, Long excludeMessageId) {
+        if (sessionId == null) {
+            return List.of();
+        }
+        List<ChatMessage> messages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        List<ChatMessage> filtered = new ArrayList<>();
+        for (ChatMessage m : messages) {
+            if (m == null) continue;
+            if (excludeMessageId != null && excludeMessageId.equals(m.getId())) {
+                continue;
+            }
+            filtered.add(m);
+        }
+        if (filtered.isEmpty()) {
+            return List.of();
+        }
+        int maxTurns = 6;
+        int start = Math.max(0, filtered.size() - maxTurns * 2);
+        List<ChatMessage> recent = filtered.subList(start, filtered.size());
+        List<com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage> history = new ArrayList<>();
+        for (ChatMessage m : recent) {
+            String role = m.getRole();
+            String content = m.getContent();
+            if (content == null || content.isBlank()) continue;
+            if ("USER".equalsIgnoreCase(role)) {
+                history.add(new com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage("USER", content));
+            } else if ("ASSISTANT".equalsIgnoreCase(role)) {
+                history.add(new com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage("ASSISTANT", content));
+            }
+        }
+        return history;
     }
 
     private <T> List<T> fromJsonList(String json, Class<T> clazz) {

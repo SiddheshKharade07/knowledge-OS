@@ -10,7 +10,7 @@
   }
 
   body {
-    @apply bg-[#f8f9fc] font-sans text-on-surface;
+    @apply bg-[#F7F8FC] font-sans text-[#172033];
   }
 
   ::selection {

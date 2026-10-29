@@ -98,6 +98,7 @@ public class PasswordServiceImpl implements PasswordService {
     @Override
     @Transactional
     public PasswordMessageResponse changePassword(ChangePasswordRequest request) {
+        PasswordPolicy.validateNewPassword(request.newPassword());
         Long userId = authUtil.getCurrentUserId();
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(

@@ -81,6 +81,17 @@ public class UserManagementServiceImpl implements UserManagementService {
             throw new ForbiddenOperationException("Creating or promoting users to ADMIN is not permitted through this API");
         }
 
+        if (createUserRequest.getDepartmentIds() != null && !createUserRequest.getDepartmentIds().isEmpty()) {
+            java.util.Set<com.example.KnowledgeOS.entity.Department> departments = new java.util.HashSet<>();
+            for (Long deptId : createUserRequest.getDepartmentIds()) {
+                if (deptId == null) continue;
+                com.example.KnowledgeOS.entity.Department dept = departmentRepository.findById(deptId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Department not found"));
+                departments.add(dept);
+            }
+            user.setDepartments(departments);
+        }
+
         User savedUser = userRepository.saveAndFlush(user);
 
         String rawToken = accountTokenService.createToken(savedUser, AccountTokenPurpose.PASSWORD_SETUP, setupTokenTtl);
@@ -210,10 +221,9 @@ public class UserManagementServiceImpl implements UserManagementService {
             java.util.Set<com.example.KnowledgeOS.entity.Department> departments = new java.util.HashSet<>();
             for (Long deptId : updateUserRequest.getDepartmentIds()) {
                 if (deptId == null) continue;
-                com.example.KnowledgeOS.entity.Department dept = departmentRepository.findById(deptId).orElse(null);
-                if (dept != null) {
-                    departments.add(dept);
-                }
+                com.example.KnowledgeOS.entity.Department dept = departmentRepository.findById(deptId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Department not found"));
+                departments.add(dept);
             }
             user.setDepartments(departments);
         }

@@ -26,8 +26,8 @@ export default function ProfilePage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.newPassword.length < 12) {
-      toast.error('New password must be at least 12 characters');
+    if (form.newPassword.length < 5 || form.newPassword.length > 20) {
+      toast.error('Password must be between 5 and 20 characters.');
       return;
     }
     if (form.newPassword !== form.confirm) {
@@ -79,8 +79,8 @@ export default function ProfilePage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-on-surface">New password</label>
-              <Input type="password" value={form.newPassword} onChange={(e) => setForm((f) => ({ ...f, newPassword: e.target.value }))} required />
-              <p className="text-xs text-on-surface-variant">12-72 characters</p>
+              <Input type="password" value={form.newPassword} onChange={(e) => setForm((f) => ({ ...f, newPassword: e.target.value }))} required minLength={5} maxLength={20} />
+              <p className="text-xs text-on-surface-variant">5-20 characters</p>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-on-surface">Confirm new password</label>

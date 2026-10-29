@@ -14,9 +14,23 @@ public interface GenerationService {
             HybridRetrievalService.RetrievalResult retrievalResult
     );
 
+    RagResponse generateAnswer(
+            String userQuery,
+            List<RankedChunk> topChunks,
+            HybridRetrievalService.RetrievalResult retrievalResult,
+            List<RagPipelineService.ChatHistoryMessage> history
+    );
+
     Flux<String> generateAnswerStream(
             String userQuery,
             List<RankedChunk> topChunks,
             HybridRetrievalService.RetrievalResult retrievalResult
+    );
+
+    Flux<String> generateAnswerStream(
+            String userQuery,
+            List<RankedChunk> topChunks,
+            HybridRetrievalService.RetrievalResult retrievalResult,
+            List<RagPipelineService.ChatHistoryMessage> history
     );
 }
