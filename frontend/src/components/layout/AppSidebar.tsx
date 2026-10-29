@@ -455,9 +455,10 @@ export function AppSidebar({ collapsed = false, onToggleCollapse, mobile = false
           type="button"
           onClick={startNewChat}
           title={collapsed ? 'New chat' : undefined}
+          aria-label={collapsed ? 'New chat' : undefined}
           className={cn(
-            'flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.06] py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10 focus-ring',
-            collapsed ? 'w-full justify-center px-0' : 'w-full px-2.5',
+            'group flex items-center gap-2 rounded-lg bg-[#4F46E5] py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-[#4338ca] hover:shadow-md focus-ring',
+            collapsed ? 'w-full justify-center px-0' : 'w-full px-3',
           )}
         >
           <Plus className="h-[18px] w-[18px] shrink-0" />

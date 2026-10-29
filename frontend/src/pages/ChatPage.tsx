@@ -94,20 +94,20 @@ function Bubble({
   const isUser = role === 'USER';
   return (
     <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
-      <div className={cn('max-w-[85%] space-y-2 sm:max-w-[78%]', isUser && 'flex flex-col items-end')}>
+      <div className={cn('w-full max-w-4xl space-y-2', isUser && 'flex flex-col items-end')}>
         <div className={cn('flex items-center gap-2 text-xs text-on-surface-variant', isUser && 'justify-end')}>
           <span>{isUser ? 'You' : 'KnowledgeOS Copilot'}</span>
           {createdAt ? <span>{formatTime(createdAt)}</span> : null}
         </div>
         <div
           className={cn(
-            'rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-card',
+            'px-1 py-1 text-sm leading-7',
             isUser
-              ? 'rounded-tr-sm bg-primary text-on-primary'
-              : 'rounded-tl-sm border border-outline-variant/40 bg-surface-container-lowest text-on-surface',
+              ? 'max-w-[720px] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-on-primary shadow-card'
+              : 'w-full max-w-3xl text-on-surface',
           )}
         >
-          <p className="whitespace-pre-wrap break-words">{content}</p>
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{content}</div>
           {streaming ? <TypingDots className="mt-2" /> : null}
         </div>
         {incomplete ? (
@@ -514,7 +514,7 @@ export default function ChatPage() {
         {isStreaming ? 'Generating a response' : turn?.status === 'done' ? 'Response complete' : ''}
       </p>
 
-      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-6 lg:px-6">
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-8 lg:px-6">
         {sessionQuery.isLoading && !turn ? (
           <ChatSkeleton />
         ) : showEmptyState ? (
@@ -543,7 +543,7 @@ export default function ChatPage() {
             </div>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-6">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
             {visibleMessages.map((item) => (
               <Bubble
                 key={item.id}

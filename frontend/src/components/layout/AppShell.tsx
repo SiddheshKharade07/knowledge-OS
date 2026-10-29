@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Menu, ShieldCheck } from 'lucide-react';
 import { AppSidebar } from './AppSidebar';
@@ -8,8 +8,11 @@ import { isAdmin } from '../../lib/permissions';
 import { cn, getInitials } from '../../lib/utils';
 
 const SIDEBAR_STORAGE_KEY = 'knowledgeos.sidebar.collapsed';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'knowledgeos.sidebar.width';
 const EXPANDED_WIDTH = 280;
 const COLLAPSED_WIDTH = 76;
+const MIN_SIDEBAR_WIDTH = 240;
+const MAX_SIDEBAR_WIDTH = 420;
 
 const pageTitles: Record<string, string> = {
   '/chat': 'Chat',
@@ -37,6 +40,22 @@ export default function AppShell() {
       return false;
     }
   });
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+      if (stored) {
+        const parsed = Number(stored);
+        if (Number.isFinite(parsed) && parsed >= MIN_SIDEBAR_WIDTH && parsed <= MAX_SIDEBAR_WIDTH) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return EXPANDED_WIDTH;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const resizingRef = useRef(false);
 
   const title = resolveTitle(location.pathname);
   const admin = isAdmin(user);
@@ -58,6 +77,45 @@ export default function AppShell() {
   }, [collapsed]);
 
   useEffect(() => {
+    if (collapsed || isResizing) return;
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [sidebarWidth, collapsed, isResizing]);
+
+  const startResizing = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    resizingRef.current = true;
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMouseMove = (event: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const next = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, event.clientX));
+      setSidebarWidth(next);
+    };
+    const onMouseUp = () => {
+      if (!resizingRef.current) return;
+      resizingRef.current = false;
+      setIsResizing(false);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizing]);
+
+  useEffect(() => {
     if (!drawerOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setDrawerOpen(false);
@@ -73,12 +131,21 @@ export default function AppShell() {
 
   return (
     <ChatActivityProvider>
-      <div className="flex h-dvh overflow-hidden bg-[#F7F8FC]">
+      <div className={cn('flex h-dvh overflow-hidden bg-[#F7F8FC]', isResizing && 'select-none')}>
         <aside
-          style={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
-          className="hidden shrink-0 overflow-hidden border-r border-[#E4E7EF] bg-white transition-[width] duration-200 ease-out lg:block"
+          style={{ width: collapsed ? COLLAPSED_WIDTH : sidebarWidth }}
+          className="relative hidden shrink-0 overflow-hidden border-r border-[#E4E7EF] bg-white transition-[width] duration-200 ease-out lg:block"
         >
           <AppSidebar collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} />
+          {!collapsed ? (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              onMouseDown={startResizing}
+              className="absolute right-0 top-0 h-full w-1 cursor-col-resize transition-colors hover:bg-[#4F46E5]/40"
+            />
+          ) : null}
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
