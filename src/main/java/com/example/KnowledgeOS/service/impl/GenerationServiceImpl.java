@@ -39,50 +39,7 @@ public class GenerationServiceImpl implements GenerationService {
             List<RankedChunk> topChunks,
             HybridRetrievalService.RetrievalResult retrievalResult
     ) {
-        if (topChunks == null || topChunks.isEmpty()) {
-            return new RagResponse(
-                    userQuery,
-                    "I'm sorry, but no relevant document context was found to answer your question.",
-                    List.of(),
-                    List.of(),
-                    retrievalResult != null ? retrievalResult.getDebugInfo() : null
-            );
-        }
-
-        ContextBuilder.BuiltContext builtContext = contextBuilder.buildContext(topChunks);
-
-        String userPrompt = String.format("""
-            Retrieved Document Context:
-            %s
-
-            User Question: %s
-            """, builtContext.getFormattedContext(), userQuery);
-
-        try {
-            String answer = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .user(userPrompt)
-                    .call()
-                    .content();
-
-            if (answer == null || answer.isBlank()) {
-                // An empty provider response is a failure, not an answer.
-                throw new GenerationException("The AI service returned an empty answer.");
-            }
-
-            return new RagResponse(
-                    userQuery,
-                    answer,
-                    builtContext.getCitations(),
-                    topChunks,
-                    retrievalResult != null ? retrievalResult.getDebugInfo() : null
-            );
-        } catch (GenerationException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Failed to generate LLM response for query '{}'", userQuery, e);
-            throw new GenerationException("The AI service could not generate an answer.", e);
-        }
+        return generateAnswer(userQuery, topChunks, retrievalResult, List.of());
     }
 
     @Override

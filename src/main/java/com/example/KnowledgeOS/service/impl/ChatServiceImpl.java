@@ -606,19 +606,27 @@ public class ChatServiceImpl implements ChatService {
             if (excludeMessageId != null && excludeMessageId.equals(m.getId())) {
                 continue;
             }
+            String role = m.getRole();
+            if (role == null) continue;
+            if (!"USER".equalsIgnoreCase(role) && !"ASSISTANT".equalsIgnoreCase(role)) {
+                continue;
+            }
             filtered.add(m);
         }
         if (filtered.isEmpty()) {
             return List.of();
         }
-        int maxTurns = 6;
-        int start = Math.max(0, filtered.size() - maxTurns * 2);
+        int maxMessages = 10;
+        int start = Math.max(0, filtered.size() - maxMessages);
         List<ChatMessage> recent = filtered.subList(start, filtered.size());
         List<com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage> history = new ArrayList<>();
         for (ChatMessage m : recent) {
             String role = m.getRole();
             String content = m.getContent();
             if (content == null || content.isBlank()) continue;
+            if (content.length() > 4000) {
+                content = content.substring(0, 4000);
+            }
             if ("USER".equalsIgnoreCase(role)) {
                 history.add(new com.example.KnowledgeOS.service.RagPipelineService.ChatHistoryMessage("USER", content));
             } else if ("ASSISTANT".equalsIgnoreCase(role)) {

@@ -8,6 +8,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Spinner } from '../components/ui/Spinner';
 import { toast } from 'sonner';
+import { KnowledgeOSLogoMark } from '../components/brand/KnowledgeOSLogo';
 
 type Tab = 'signin' | 'reset';
 
@@ -92,11 +93,12 @@ export default function LoginPage() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(79,70,229,0.25),transparent_55%)]" />
           <div className="relative z-10 flex h-full flex-col px-10 py-10 xl:px-14">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/95 text-base font-semibold text-on-primary shadow-card">
-                K
-              </div>
+              <KnowledgeOSLogoMark size={40} className="rounded-xl shadow-card" />
               <div>
-                <p className="text-sm font-semibold text-white">KnowledgeOS</p>
+                <p className="text-sm font-semibold">
+                  <span className="text-white">Knowledge</span>
+                  <span className="text-white/95">OS</span>
+                </p>
                 <p className="text-xs text-white/70">Enterprise Knowledge Assistant</p>
               </div>
             </div>
@@ -147,10 +149,11 @@ export default function LoginPage() {
         <section className="flex flex-col">
           <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 sm:px-6 lg:px-12 xl:px-16">
             <div className="mb-6 flex w-full max-w-[500px] flex-col items-center text-center lg:hidden">
-              <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-lg font-semibold text-on-primary">
-                K
-              </div>
-              <h1 className="text-lg font-semibold text-on-surface">KnowledgeOS</h1>
+              <KnowledgeOSLogoMark size={44} className="mb-3 rounded-xl" />
+              <h1 className="text-lg font-semibold">
+                <span className="text-[#1E293B]">Knowledge</span>
+                <span className="text-[#4F46E5]">OS</span>
+              </h1>
               <p className="text-sm text-on-surface-variant">Enterprise Knowledge Assistant</p>
             </div>
             <div className="w-full max-w-[500px] xl:max-w-[520px]">

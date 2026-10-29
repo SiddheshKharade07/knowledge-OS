@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { KnowledgeOSLogo } from '../brand/KnowledgeOSLogo';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { startOfDay, subDays } from 'date-fns';
 import {
@@ -403,15 +404,11 @@ export function AppSidebar({ collapsed = false, onToggleCollapse, mobile = false
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-surface-container-lowest">
       <div className={cn('flex h-14 shrink-0 items-center gap-2', collapsed ? 'justify-center px-2' : 'px-3')}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-on-primary shadow-card">
-          K
-        </div>
-        {!collapsed ? (
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-on-surface">KnowledgeOS</p>
-            <p className="truncate text-[11px] text-on-surface-variant">Enterprise Knowledge Assistant</p>
-          </div>
-        ) : null}
+        {collapsed ? (
+          <KnowledgeOSLogo variant="icon" size={32} />
+        ) : (
+          <KnowledgeOSLogo variant="horizontal" size={32} className="min-w-0 flex-1" />
+        )}
         {!mobile && onToggleCollapse ? (
           <button
             type="button"
